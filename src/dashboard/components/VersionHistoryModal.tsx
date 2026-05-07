@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { save } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 
+import { resolveFileDownloadPath } from "../../lib/downloadDestination";
 import { downloadFileVersion, listFileVersions } from "../../lib/tauri";
 import { basenameKey, formatBytes, formatRelativeTime, handleTauriError } from "../../lib/utils";
 import type { FileVersion } from "../../types";
@@ -69,9 +69,7 @@ export default function VersionHistoryModal({
     const nameWithoutExt = filename.replace(ext, "");
     const defaultName = `${nameWithoutExt}_${version.versionId.substring(0, 8)}${ext}`;
 
-    const dest = await save({
-      defaultPath: defaultName,
-    });
+    const dest = await resolveFileDownloadPath(defaultName);
     if (dest == null) return;
 
     setDownloading(version.versionId);

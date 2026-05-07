@@ -11,7 +11,7 @@ import DashboardDisconnected from "./components/DashboardDisconnected";
 import FileGrid from "./components/FileGrid";
 import NewFolderModal from "./components/NewFolderModal";
 import RenameModal from "./components/RenameModal";
-import TransferProgressBar from "./components/TransferProgressBar";
+import TransferDock from "./components/TransferDock";
 import VersionHistoryModal from "./components/VersionHistoryModal";
 
 function SearchIcon({ className }: { className?: string }) {
@@ -34,6 +34,18 @@ function UploadIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+    </svg>
+  );
+}
+
+function FolderUploadIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+      <path
+        d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 7.5l-.735-.477a2.25 2.25 0 00-1.215-.348H3.75A2.25 2.25 0 001.5 9v10.5A2.25 2.25 0 003.75 21.75h16.5a2.25 2.25 0 002.25-2.25v-7.03a2.25 2.25 0 00-.848-1.756l-4.72-3.848a2.25 2.25 0 00-1.428-.508H11.25l-1.83-1.83a2.25 2.25 0 00-1.59-.66H6.75Z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -197,6 +209,16 @@ export default function Dashboard() {
                 <span className="hidden sm:inline">New folder</span>
               </button>
               <button
+                className="flex items-center gap-1.5 rounded-lg border border-[0.5px] border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-zinc-50 hover:text-zinc-600 disabled:opacity-50"
+                disabled={d.isRowActionPending}
+                onClick={d.handleUploadFolderClick}
+                title="Upload an entire folder"
+                type="button"
+              >
+                <FolderUploadIcon className="h-4 w-4" />
+                <span className="hidden md:inline">Upload folder</span>
+              </button>
+              <button
                 className="flex items-center gap-1.5 rounded-lg bg-accent-700 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-800 active:bg-accent-950 disabled:opacity-50"
                 disabled={d.isRowActionPending}
                 onClick={d.handleUploadClick}
@@ -237,7 +259,11 @@ export default function Dashboard() {
         </>
       )}
 
-      <TransferProgressBar progress={d.transferProgress} />
+      <TransferDock
+        onCancelUploadBatch={d.handleCancelUploadBatch}
+        progress={d.transferProgress}
+        uploadBatchPending={d.uploadMut.isPending}
+      />
 
       <NewFolderModal
         isPending={d.createFolderMut.isPending}

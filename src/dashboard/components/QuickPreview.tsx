@@ -30,19 +30,6 @@ function getFileExtension(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() ?? "";
 }
 
-function getLanguageFromExt(ext: string): string {
-  const map: Record<string, string> = {
-    js: "javascript", ts: "typescript", jsx: "javascript", tsx: "typescript",
-    py: "python", rb: "ruby", rs: "rust", go: "go", java: "java",
-    c: "c", cpp: "cpp", h: "c", hpp: "cpp", cs: "csharp",
-    php: "php", swift: "swift", kt: "kotlin", sh: "bash", bash: "bash",
-    sql: "sql", graphql: "graphql", json: "json", xml: "xml",
-    yaml: "yaml", yml: "yaml", toml: "toml", md: "markdown",
-    html: "html", htm: "html", css: "css", scss: "scss",
-  };
-  return map[ext] ?? "plaintext";
-}
-
 function XIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">

@@ -9,10 +9,11 @@ import {
   duplicateObject,
   moveObject,
   openObject,
-  uploadFile,
 } from "../lib/tauri";
+import { runLocalUploadBatch } from "../lib/uploadBatch";
 import { joinObjectKey, sanitizePathSegment } from "../lib/utils";
 import { useBucketStore } from "../store/bucketStore";
+import { useUploadBatchStore } from "../store/uploadBatchStore";
 
 function useInvalidateBucketList(): () => void {
   const queryClient = useQueryClient();
@@ -33,15 +34,12 @@ export function useUploadFilesMutation(prefix: string) {
   const invalidate = useInvalidateBucketList();
 
   return useMutation({
-    mutationFn: async (localPaths: string[]) => {
-      for (const localPath of localPaths) {
-        const base = localPath.split(/[/\\]/).pop() ?? "file";
-        const key = joinObjectKey(prefix, base);
-        await uploadFile(localPath, key);
-      }
-    },
+    mutationFn: (localPaths: string[]) => runLocalUploadBatch(prefix, localPaths),
     onSuccess: () => {
       invalidate();
+    },
+    onSettled: () => {
+      useUploadBatchStore.getState().resetCancel();
     },
   });
 }

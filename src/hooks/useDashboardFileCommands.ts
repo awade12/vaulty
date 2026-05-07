@@ -1,4 +1,5 @@
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { join } from "@tauri-apps/api/path";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
 import { toast } from "sonner";
 
@@ -12,8 +13,14 @@ import {
 } from "./useBucketFileMutations";
 import { useDashboardDeleteFlow } from "./useDashboardDeleteFlow";
 import { useDashboardFileDrop } from "./useDashboardFileDrop";
+import {
+  resolveBulkDownloadFolder,
+  resolveFileDownloadPath,
+  resolveZipSavePath,
+} from "../lib/downloadDestination";
 import { downloadAsZip, getPresignedUrl } from "../lib/tauri";
 import { basenameKey, handleTauriError } from "../lib/utils";
+import { useUploadBatchStore } from "../store/uploadBatchStore";
 import type { BucketFile } from "../types";
 
 interface UseDashboardFileCommandsParams {
@@ -52,10 +59,14 @@ export function useDashboardFileCommands({
         onError: (e) => {
           toast.error(handleTauriError(e));
         },
-        onSuccess: () => {
-          toast.success(
-            paths.length === 1 ? "File uploaded" : "Uploaded files",
-          );
+        onSuccess: (result) => {
+          if (result.cancelled) {
+            toast.warning(`Stopped · uploaded ${result.completed} of ${result.total}`);
+          } else {
+            toast.success(
+              result.completed === 1 ? "File uploaded" : `Uploaded ${result.completed} files`,
+            );
+          }
         },
       });
     },
@@ -77,12 +88,51 @@ export function useDashboardFileCommands({
       onError: (e) => {
         toast.error(handleTauriError(e));
       },
-      onSuccess: () => {
-        toast.success(
-          paths.length === 1 ? "File uploaded" : `Uploaded ${paths.length} files`,
-        );
+      onSuccess: (result) => {
+        if (result.cancelled) {
+          toast.warning(`Stopped · uploaded ${result.completed} of ${result.total}`);
+        } else {
+          toast.success(
+            result.completed === 1 ? "File uploaded" : `Uploaded ${result.completed} files`,
+          );
+        }
       },
     });
+  }
+
+  async function handleUploadFolderClick(): Promise<void> {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Upload folder",
+    });
+    if (selected == null) {
+      return;
+    }
+    const folder = Array.isArray(selected) ? selected[0] ?? null : selected;
+    if (folder == null) {
+      return;
+    }
+    uploadMut.mutate([folder], {
+      onError: (e) => {
+        toast.error(handleTauriError(e));
+      },
+      onSuccess: (result) => {
+        if (result.cancelled) {
+          toast.warning(`Stopped · uploaded ${result.completed} of ${result.total}`);
+        } else {
+          toast.success(
+            result.completed === 1 ? "File uploaded" : `Uploaded ${result.completed} files`,
+          );
+        }
+      },
+    });
+  }
+
+  function handleCancelUploadBatch(): void {
+    if (uploadMut.isPending) {
+      useUploadBatchStore.getState().requestCancel();
+    }
   }
 
   function handleNewFolderClick(): void {
@@ -106,10 +156,7 @@ export function useDashboardFileCommands({
   }
 
   async function handleDownloadFile(file: BucketFile): Promise<void> {
-    const defaultPath = basenameKey(file.key);
-    const dest = await save({
-      defaultPath: defaultPath.length > 0 ? defaultPath : "download",
-    });
+    const dest = await resolveFileDownloadPath(basenameKey(file.key));
     if (dest == null) {
       return;
     }
@@ -196,30 +243,32 @@ export function useDashboardFileCommands({
   }
 
   async function handleBulkDownload(keys: string[]): Promise<void> {
-    if (keys.length === 0) return;
-    
-    for (const key of keys) {
+    const fileKeys = keys.filter((k) => !k.endsWith("/"));
+    if (fileKeys.length === 0) {
+      return;
+    }
+    const folder = await resolveBulkDownloadFolder();
+    if (folder == null) {
+      return;
+    }
+    for (const key of fileKeys) {
       const filename = basenameKey(key);
-      const dest = await save({
-        defaultPath: filename.length > 0 ? filename : "download",
-      });
-      if (dest == null) continue;
-      
+      const destPath = await join(folder, filename);
       downloadMut.mutate(
-        { destPath: dest, key },
+        { destPath, key },
         {
           onError: (e) => {
-            toast.error(`Failed to download ${filename}: ${handleTauriError(e)}`);
+            toast.error(`Failed ${filename}: ${handleTauriError(e)}`);
           },
         },
       );
     }
-    toast.success(`Downloading ${keys.length} files`);
+    toast.success(`Queued ${fileKeys.length} downloads`);
     setSelectedKeys(new Set());
   }
 
   function handleBulkDelete(keys: string[]): void {
-    del.handleBulkDeleteRequest(keys);
+    del.handleBulkDeleteWithKeys(keys);
   }
 
   function handleDuplicateFile(file: BucketFile): void {
@@ -236,11 +285,8 @@ export function useDashboardFileCommands({
 
   async function handleZipDownload(keys: string[]): Promise<void> {
     if (keys.length === 0) return;
-    
-    const dest = await save({
-      defaultPath: "files.zip",
-      filters: [{ name: "ZIP Archive", extensions: ["zip"] }],
-    });
+
+    const dest = await resolveZipSavePath("vaulty-selection.zip");
     if (dest == null) return;
     
     try {
@@ -273,6 +319,8 @@ export function useDashboardFileCommands({
     isRowActionPending,
     deleteBusy: del.deleteBusy,
     handleUploadClick,
+    handleCancelUploadBatch,
+    handleUploadFolderClick,
     handleNewFolderClick,
     handleFolderModalClose,
     handleFolderCreate,

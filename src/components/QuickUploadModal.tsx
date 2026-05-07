@@ -12,9 +12,11 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { useConnectionsQuery } from "../hooks/useConnectionsQuery";
-import { activateConnection, uploadFile } from "../lib/tauri";
-import { handleTauriError, joinObjectKey } from "../lib/utils";
+import { activateConnection } from "../lib/tauri";
+import { runLocalUploadBatch } from "../lib/uploadBatch";
+import { handleTauriError } from "../lib/utils";
 import { useBucketStore } from "../store/bucketStore";
+import { useUploadBatchStore } from "../store/uploadBatchStore";
 
 export default function QuickUploadModal() {
   const navigate = useNavigate();
@@ -97,26 +99,31 @@ export default function QuickUploadModal() {
       setActiveConnectionId(selectedConnectionId);
       setSessionReady(true);
       const normalizedPrefix = prefix.trim().replace(/^\/+/, "").replace(/\/+$/, "");
-      for (const localPath of quickUploadPaths) {
-        const base = localPath.split(/[/\\]/).pop() ?? "file";
-        const key = joinObjectKey(normalizedPrefix, base);
-        await uploadFile(localPath, key);
-      }
-      toast.success(
-        quickUploadPaths.length === 1
-          ? "File uploaded"
-          : `Uploaded ${quickUploadPaths.length} files`,
-      );
-      closeQuickUpload();
+      const result = await runLocalUploadBatch(normalizedPrefix, quickUploadPaths);
       await queryClient.invalidateQueries({
         queryKey: ["bucket-files", selectedConnectionId],
       });
+      if (result.cancelled) {
+        toast.warning(`Stopped · uploaded ${result.completed} of ${result.total}`);
+      } else {
+        toast.success(
+          result.completed === 1 ? "File uploaded" : `Uploaded ${result.completed} files`,
+        );
+      }
+      closeQuickUpload();
       navigate("/");
     } catch (err) {
       toast.error(handleTauriError(err));
     } finally {
       setBusy(false);
       setIsSwitchingConnection(false);
+      useUploadBatchStore.getState().resetCancel();
+    }
+  }
+
+  function handleStopUploadClick(): void {
+    if (busy) {
+      useUploadBatchStore.getState().requestCancel();
     }
   }
 
@@ -193,6 +200,15 @@ export default function QuickUploadModal() {
             >
               Cancel
             </button>
+            {busy ? (
+              <button
+                className="rounded-md border border-[0.5px] border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-500"
+                onClick={handleStopUploadClick}
+                type="button"
+              >
+                Stop
+              </button>
+            ) : null}
             <button
               className="rounded-md bg-accent-700 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-800 active:bg-accent-950 disabled:opacity-50"
               disabled={!canSubmit}

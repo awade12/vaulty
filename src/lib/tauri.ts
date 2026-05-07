@@ -5,6 +5,7 @@ import type {
   BulkAddConnectionsResult,
   ConnectionConfig,
   FileVersion,
+  LocalUploadItem,
 } from "../types";
 
 export async function addConnection(payload: {
@@ -41,6 +42,12 @@ export async function activateConnection(id: string): Promise<void> {
 
 export async function listFiles(prefix: string): Promise<BucketFile[]> {
   return invoke<BucketFile[]>("list_files", { prefix });
+}
+
+export async function collectUploadCandidates(
+  paths: string[],
+): Promise<LocalUploadItem[]> {
+  return invoke<LocalUploadItem[]>("collect_upload_candidates", { paths });
 }
 
 export async function uploadFile(

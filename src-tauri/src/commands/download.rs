@@ -16,6 +16,15 @@ pub async fn download_file(
     if key.trim().is_empty() || key.ends_with('/') {
         return Err(AppError::InvalidKey("Download key must be a file".into()).into_string());
     }
+    let client = state.client().await.map_err(AppError::into_string)?;
+    let bucket = state.active_bucket().await;
+    if bucket.is_empty() {
+        return Err(AppError::NoActiveConnection.into_string());
+    }
+    let _permit = state
+        .acquire_transfer_permit()
+        .await
+        .map_err(AppError::into_string)?;
     let dest = Path::new(&dest_path);
     if let Some(parent) = dest.parent() {
         if !parent.as_os_str().is_empty() {
@@ -23,11 +32,6 @@ pub async fn download_file(
                 .await
                 .map_err(|e| AppError::Io(e).into_string())?;
         }
-    }
-    let client = state.client().await.map_err(AppError::into_string)?;
-    let bucket = state.active_bucket().await;
-    if bucket.is_empty() {
-        return Err(AppError::NoActiveConnection.into_string());
     }
     operations::get_object_to_file(&client, &bucket, &key, dest, &app)
         .await

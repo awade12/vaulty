@@ -22,6 +22,11 @@ export interface BulkAddConnectionsResult {
   failed: { bucket: string; error: string }[];
 }
 
+export interface LocalUploadItem {
+  localPath: string;
+  objectRelativeKey: string;
+}
+
 export interface BucketFile {
   key: string;
   size: number;

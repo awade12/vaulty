@@ -20,6 +20,7 @@ import ConnectionForm, {
 import ConnectionListItem from "./components/ConnectionListItem";
 import DatabaseIcon from "./components/DatabaseIcon";
 import DiscoverBucketsModal from "./components/DiscoverBucketsModal";
+import DownloadsPreferences from "./components/DownloadsPreferences";
 
 export default function Settings() {
   const queryClient = useQueryClient();
@@ -224,6 +225,7 @@ export default function Settings() {
       </header>
       <div className="flex min-h-0 flex-1 gap-8 overflow-auto p-6">
         <div className="min-w-0 flex-1">
+          <DownloadsPreferences />
           <div className="mb-5 flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100">
               <DatabaseIcon className="h-5 w-5 text-zinc-500" />

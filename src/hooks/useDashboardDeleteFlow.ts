@@ -39,6 +39,13 @@ export function useDashboardDeleteFlow({
     setPendingDelete({ kind: "bulk", keys });
   }
 
+  function handleBulkDeleteWithKeys(keys: string[]): void {
+    if (keys.length === 0) {
+      return;
+    }
+    setPendingDelete({ kind: "bulk", keys });
+  }
+
   function handleRecursiveRequestForPrefix(): void {
     if (prefix.trim().length === 0) {
       toast.error("Open a folder first");
@@ -121,6 +128,7 @@ export function useDashboardDeleteFlow({
     deleteBusy,
     handleDeleteRequest,
     handleBulkDeleteRequest,
+    handleBulkDeleteWithKeys,
     handleRecursiveRequestForPrefix,
     handleRecursiveRequestFolder,
     handleDeleteModalClose,

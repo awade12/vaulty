@@ -5752,6 +5752,7 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "uuid",
+ "walkdir",
  "zip",
 ]
 

@@ -28,6 +28,9 @@ pub enum AppError {
 
     #[error("Too many objects for this operation (max {max})")]
     TooManyObjects { max: u32 },
+
+    #[error("Transfer queue unavailable")]
+    TransferLimiterClosed,
 }
 
 impl AppError {

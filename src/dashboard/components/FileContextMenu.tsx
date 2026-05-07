@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useRef } from "react";
 
 import { clsx } from "clsx";
 

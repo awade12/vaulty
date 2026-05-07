@@ -126,6 +126,10 @@ pub async fn open_object(
     if bucket.is_empty() {
         return Err(AppError::NoActiveConnection.into_string());
     }
+    let _permit = state
+        .acquire_transfer_permit()
+        .await
+        .map_err(AppError::into_string)?;
     let cache = app
         .path()
         .cache_dir()
@@ -169,7 +173,12 @@ pub async fn download_as_zip(
     if bucket.is_empty() {
         return Err(AppError::NoActiveConnection.into_string());
     }
-    
+
+    let _permit = state
+        .acquire_transfer_permit()
+        .await
+        .map_err(AppError::into_string)?;
+
     let cache = app
         .path()
         .cache_dir()
@@ -253,6 +262,10 @@ pub async fn download_file_version(
     if bucket.is_empty() {
         return Err(AppError::NoActiveConnection.into_string());
     }
+    let _permit = state
+        .acquire_transfer_permit()
+        .await
+        .map_err(AppError::into_string)?;
     let dest = PathBuf::from(&dest_path);
     operations::get_object_version_to_file(&client, &bucket, &key, &version_id, &dest, &app)
         .await

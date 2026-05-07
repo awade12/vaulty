@@ -37,6 +37,7 @@ pub fn run() {
             bucket::create_folder,
             bucket::get_presigned_url,
             upload::upload_file,
+            upload::collect_upload_candidates,
             download::download_file,
             object_ops::move_object,
             object_ops::delete_objects,

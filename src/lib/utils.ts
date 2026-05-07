@@ -58,6 +58,20 @@ export function basenameKey(key: string): string {
   return i === -1 ? trimmed : trimmed.slice(i + 1);
 }
 
+export function transferDisplayLabel(objectKey: string): string {
+  const trimmed = objectKey.replace(/\/+$/, "");
+  const parts = trimmed.split("/").filter((s) => s.length > 0);
+  if (parts.length === 0) {
+    return trimmed;
+  }
+  if (parts.length === 1) {
+    return parts[0]!;
+  }
+  const parent = parts[parts.length - 2]!;
+  const leaf = parts[parts.length - 1]!;
+  return `${parent}/${leaf}`;
+}
+
 export function folderConfirmToken(prefix: string): string {
   const trimmed = prefix.replace(/\/+$/, "");
   const seg = trimmed.split("/").pop() ?? "";

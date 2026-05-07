@@ -313,7 +313,7 @@ export default function FileGrid({
   onDownloadFile,
   onDeleteFile,
   onCopyLink,
-  onOpenFile,
+  onOpenFile: _onOpenFile,
   onRenameFile,
   onRecursiveDeleteFolder,
   onMoveFile,
@@ -373,7 +373,6 @@ export default function FileGrid({
     .filter((f): f is BucketFile => f != null && !f.isFolder)
     .slice(0, 5);
 
-  const starredInView = files.filter((f) => starredKeys.includes(f.key));
   const isSelectionMode = selectedKeys.size > 0;
   const lastClickedIndex = useRef<number>(-1);
 
