@@ -34,7 +34,14 @@ export function useUploadFilesMutation(prefix: string) {
   const invalidate = useInvalidateBucketList();
 
   return useMutation({
-    mutationFn: (localPaths: string[]) => runLocalUploadBatch(prefix, localPaths),
+    // The mutation closes over `prefix` as the default upload target, but
+    // callers can pass a string `targetPrefix` to override (e.g. when
+    // dropping files onto a specific folder).
+    mutationFn: (input: string[] | { paths: string[]; targetPrefix: string }) => {
+      const paths = Array.isArray(input) ? input : input.paths;
+      const target = Array.isArray(input) ? prefix : input.targetPrefix;
+      return runLocalUploadBatch(target, paths);
+    },
     onSuccess: () => {
       invalidate();
     },

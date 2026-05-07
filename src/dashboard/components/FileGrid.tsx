@@ -12,6 +12,15 @@ import { displayNameForKey, formatBytes, formatRelativeTime, handleTauriError } 
 // one download. The set is cleared once the export resolves either way.
 const inflightDragExports = new Set<string>();
 
+// Module-level timestamp set whenever a drop is consumed inside Vaulty.
+// `dragend` reads this to distinguish "drop landed inside the app" from
+// "drag fell off the edge / went to Finder", because WKWebView's
+// `e.dataTransfer.dropEffect` is unreliable for that decision.
+let lastInAppDropAt = 0;
+export function markInAppDrop(): void {
+  lastInAppDropAt = Date.now();
+}
+
 async function startNativeDragExport(key: string): Promise<void> {
   if (inflightDragExports.has(key)) return;
   inflightDragExports.add(key);
@@ -163,16 +172,15 @@ function FileItem({
     onDragStart();
   }
 
-  function handleDragEnd(e: DragEvent) {
-    // If the HTML5 drag wasn't accepted by anything inside Vaulty, the OS
-    // reports `dropEffect === "none"`. Treat that as "user wanted to drag
-    // out" and stage the file for them. We avoid triggering this for
-    // folders (we don't support folder export yet) and for successful
-    // in-app folder drops (dropEffect would be "move").
-    const wentOutside =
-      !file.isFolder && e.dataTransfer.dropEffect === "none";
+  function handleDragEnd(_e: DragEvent) {
+    // Distinguish "user dropped on a folder inside Vaulty" from "user
+    // dropped outside the window". We can't trust `dropEffect` in
+    // WKWebView, so we look at a timestamp set by every internal drop
+    // handler via `markInAppDrop`. A drop within the last ~150ms means
+    // the drag stayed in-app; otherwise the drag fell off the window.
+    const droppedInApp = Date.now() - lastInAppDropAt < 150;
     onDragEnd();
-    if (wentOutside) {
+    if (!file.isFolder && !droppedInApp) {
       void startNativeDragExport(file.key);
     }
   }
@@ -191,6 +199,7 @@ function FileItem({
 
   function handleDrop(e: DragEvent) {
     e.preventDefault();
+    markInAppDrop();
     onDrop();
   }
 
@@ -209,6 +218,7 @@ function FileItem({
           isDragOver && file.isFolder && "bg-accent-100 ring-2 ring-accent-400",
           isSelected && "bg-accent-50"
         )}
+        data-vaulty-folder-key={file.isFolder ? file.key : undefined}
         draggable={!file.isFolder}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
@@ -279,10 +289,11 @@ function FileItem({
         isDragOver && file.isFolder && "bg-accent-100 ring-2 ring-accent-400",
         isSelected && "bg-accent-50 ring-2 ring-accent-200"
       )}
+      data-vaulty-folder-key={file.isFolder ? file.key : undefined}
       draggable={!file.isFolder}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
-      onDragEnd={onDragEnd}
+      onDragEnd={handleDragEnd}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDragStart={handleDragStart}
@@ -555,6 +566,7 @@ export default function FileGrid({
 
   function handleContainerDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
+    markInAppDrop();
     setDropZoneActive(false);
   }
 

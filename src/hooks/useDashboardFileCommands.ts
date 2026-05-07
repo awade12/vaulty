@@ -51,26 +51,39 @@ export function useDashboardFileCommands({
   const duplicateMut = useDuplicateObjectMutation();
 
   const handlePathsDropped = useCallback(
-    (paths: string[]) => {
+    (paths: string[], targetFolderKey: string | null) => {
       if (paths.length === 0) {
         return;
       }
-      uploadMut.mutate(paths, {
-        onError: (e) => {
-          toast.error(handleTauriError(e));
+      // If the user dropped on a specific folder card, upload into that
+      // folder (its key already ends with `/`); otherwise upload to the
+      // current prefix.
+      const target = targetFolderKey ?? prefix;
+      const folderName =
+        targetFolderKey != null
+          ? targetFolderKey.replace(/\/+$/, "").split("/").pop() ?? "folder"
+          : null;
+      uploadMut.mutate(
+        { paths, targetPrefix: target },
+        {
+          onError: (e) => {
+            toast.error(handleTauriError(e));
+          },
+          onSuccess: (result) => {
+            if (result.cancelled) {
+              toast.warning(
+                `Stopped · uploaded ${result.completed} of ${result.total}`,
+              );
+            } else {
+              const verb =
+                result.completed === 1 ? "File uploaded" : `Uploaded ${result.completed} files`;
+              toast.success(folderName != null ? `${verb} into ${folderName}/` : verb);
+            }
+          },
         },
-        onSuccess: (result) => {
-          if (result.cancelled) {
-            toast.warning(`Stopped · uploaded ${result.completed} of ${result.total}`);
-          } else {
-            toast.success(
-              result.completed === 1 ? "File uploaded" : `Uploaded ${result.completed} files`,
-            );
-          }
-        },
-      });
+      );
     },
-    [uploadMut],
+    [uploadMut, prefix],
   );
 
   useDashboardFileDrop({
