@@ -4,6 +4,27 @@ A desktop app for managing S3-compatible cloud storage. Browse, upload, download
 
 Built with [Tauri 2](https://tauri.app/), React, TypeScript, and Rust.
 
+## Install
+
+Download the latest build for your OS from the
+[**latest release**](https://github.com/awade12/vaulty/releases/latest):
+
+| Platform | File |
+|---|---|
+| macOS (Apple Silicon) | `vaulty_*_aarch64.dmg` |
+| macOS (Intel) | `vaulty_*_x64.dmg` |
+| Windows | `vaulty_*_x64-setup.exe` |
+| Linux | `vaulty_*_amd64.AppImage` |
+
+Vaulty isn't yet code-signed, so the OS will warn on first launch:
+
+- **macOS** — right-click the app → **Open** → **Open** again. Only needed once.
+- **Windows** — SmartScreen → **More info** → **Run anyway**.
+- **Linux** — `chmod +x vaulty_*.AppImage && ./vaulty_*.AppImage`.
+
+After install, Vaulty checks for updates from **Settings → Updates** and
+applies them silently.
+
 ## Features
 
 - **Multiple connections** — save and switch between any number of S3-compatible buckets
