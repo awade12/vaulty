@@ -1,40 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 
 import { clsx } from "clsx";
-import { toast } from "sonner";
 
+import { usePointerMoveFileToFolder, type DragGhostPayload } from "../../hooks/usePointerMoveFileToFolder";
 import type { FolderColor, FolderStyle } from "../../lib/folderStyle";
-import { startDragExport } from "../../lib/tauri";
-import { displayNameForKey, formatBytes, formatRelativeTime, handleTauriError } from "../../lib/utils";
-
-// De-dupe in-flight drag-export prep so a flurry of dragstart events for the
-// same key (which can happen when the user re-grabs a file) only triggers
-// one download. The set is cleared once the export resolves either way.
-const inflightDragExports = new Set<string>();
-
-// Module-level timestamp set whenever a drop is consumed inside Vaulty.
-// `dragend` reads this to distinguish "drop landed inside the app" from
-// "drag fell off the edge / went to Finder", because WKWebView's
-// `e.dataTransfer.dropEffect` is unreliable for that decision.
-let lastInAppDropAt = 0;
-export function markInAppDrop(): void {
-  lastInAppDropAt = Date.now();
-}
-
-async function startNativeDragExport(key: string): Promise<void> {
-  if (inflightDragExports.has(key)) return;
-  inflightDragExports.add(key);
-  try {
-    const result = await startDragExport(key);
-    if (result.revealedOnly) {
-      toast.info("Couldn't start the native drag — opened the staged file in Finder instead.");
-    }
-  } catch (e) {
-    toast.error(handleTauriError(e));
-  } finally {
-    inflightDragExports.delete(key);
-  }
-}
+import { displayNameForKey, formatBytes, formatRelativeTime } from "../../lib/utils";
 import { useBucketStore, type ViewMode } from "../../store/bucketStore";
 import { useFolderStyleStore } from "../../store/folderStyleStore";
 import type { BucketFile } from "../../types";
@@ -107,19 +77,16 @@ interface FileItemProps {
   isSelectionMode: boolean;
   viewMode: ViewMode;
   isDragOver: boolean;
+  isPointerDragging: boolean;
   childCount?: number;
   folderColor?: FolderColor;
   folderStyle: FolderStyle;
   onOpen: () => void;
   onSelect: (e: MouseEvent) => void;
   onContextMenu: (position: { x: number; y: number }) => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onDragOver: () => void;
-  onDragLeave: () => void;
-  /** Receives the dragged source key (S3 key from `dataTransfer`). */
-  onDrop: (sourceKey: string) => void;
   onToggleStar: () => void;
+  suppressActivationUntilRef: MutableRefObject<number>;
+  onFileRowPointerDown?: (e: ReactPointerEvent<HTMLElement>) => void;
 }
 
 function FileItem({
@@ -131,23 +98,27 @@ function FileItem({
   isSelectionMode,
   viewMode,
   isDragOver,
+  isPointerDragging,
   childCount,
   folderColor = "default",
   folderStyle,
   onOpen,
   onSelect,
   onContextMenu,
-  onDragStart,
-  onDragEnd,
-  onDragOver,
-  onDragLeave,
-  onDrop,
   onToggleStar,
+  suppressActivationUntilRef,
+  onFileRowPointerDown,
   animationDelay = 0,
 }: FileItemProps & { animationDelay?: number }) {
   const name = displayNameForKey(file.key, prefix);
+  const fileRowPointerDown = !file.isFolder ? onFileRowPointerDown : undefined;
 
   function handleClick(e: MouseEvent) {
+    if (performance.now() < suppressActivationUntilRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     e.stopPropagation();
     if (e.metaKey || e.ctrlKey || e.shiftKey || isSelectionMode) {
       onSelect(e);
@@ -167,54 +138,6 @@ function FileItem({
     onContextMenu({ x: e.clientX, y: e.clientY });
   }
 
-  function handleDragStart(e: DragEvent) {
-    e.dataTransfer.setData("text/plain", file.key);
-    e.dataTransfer.effectAllowed = "move";
-    onDragStart();
-  }
-
-  function handleDragEnd(_e: DragEvent) {
-    // Distinguish "user dropped on a folder inside Vaulty" from "user
-    // dropped outside the window". We can't trust `dropEffect` in
-    // WKWebView, so we look at a timestamp set by every internal drop
-    // handler via `markInAppDrop`. A drop within the last ~150ms means
-    // the drag stayed in-app; otherwise the drag fell off the window.
-    const droppedInApp = Date.now() - lastInAppDropAt < 150;
-    onDragEnd();
-    if (!file.isFolder && !droppedInApp) {
-      void startNativeDragExport(file.key);
-    }
-  }
-
-  function handleDragOver(e: DragEvent) {
-    if (!file.isFolder) return;
-    // Only accept HTML5 drags that originated from another Vaulty file.
-    // Tauri 2 doesn't put types on external file drops (those go through
-    // the OS-level event), so a non-empty types list here means an in-app
-    // drag.
-    const types = Array.from(e.dataTransfer.types);
-    if (!types.includes("text/plain")) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    onDragOver();
-  }
-
-  function handleDragLeave() {
-    onDragLeave();
-  }
-
-  function handleDrop(e: DragEvent) {
-    if (!file.isFolder) return;
-    e.preventDefault();
-    e.stopPropagation();
-    markInAppDrop();
-    // Read the dragged key directly from dataTransfer rather than relying
-    // on React state, which can be stale across event handlers in
-    // different components.
-    const sourceKey = e.dataTransfer.getData("text/plain");
-    onDrop(sourceKey);
-  }
-
   function handleStarClick(e: MouseEvent) {
     e.stopPropagation();
     onToggleStar();
@@ -224,21 +147,23 @@ function FileItem({
     return (
       <div
         className={clsx(
-          "group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-all duration-150 ease-out hover:bg-zinc-50",
+          "group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 ease-out hover:bg-zinc-50",
+          "transition-[opacity,transform,background-color] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-75 motion-reduce:transition-none",
           "animate-list-item-in",
           focused && "ring-2 ring-accent-700",
-          isDragOver && file.isFolder && "bg-accent-100 ring-2 ring-accent-400",
-          isSelected && "bg-accent-50"
+          isDragOver &&
+            file.isFolder &&
+            "z-[1] scale-[1.01] bg-accent-50 ring-2 ring-accent-200",
+          isSelected && !isPointerDragging && "bg-accent-50",
+          fileRowPointerDown && !file.isFolder && "cursor-grab touch-none select-none",
+          isPointerDragging &&
+            !file.isFolder &&
+            "relative z-20 cursor-grabbing opacity-[0.35] hover:bg-transparent"
         )}
         data-vaulty-folder-key={file.isFolder ? file.key : undefined}
-        draggable={!file.isFolder}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
-        onDragEnd={handleDragEnd}
-        onDragLeave={handleDragLeave}
-        onDragOver={handleDragOver}
-        onDragStart={handleDragStart}
-        onDrop={handleDrop}
+        onPointerDown={fileRowPointerDown}
         style={{ animationDelay: `${animationDelay}ms` }}
       >
         <button
@@ -295,21 +220,24 @@ function FileItem({
   return (
     <div
       className={clsx(
-        "group relative flex cursor-pointer flex-col items-center rounded-xl p-3 transition-all duration-150 ease-out hover:bg-zinc-50 hover:scale-[1.02]",
+        "group relative flex cursor-pointer flex-col items-center rounded-xl p-3 ease-out hover:bg-zinc-50",
+        "transition-[opacity,transform,background-color] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-75 motion-reduce:transition-none",
+        !isPointerDragging && !(isDragOver && file.isFolder) && "hover:scale-[1.02]",
         "animate-file-item-in",
         focused && "ring-2 ring-accent-700",
-        isDragOver && file.isFolder && "bg-accent-100 ring-2 ring-accent-400",
-        isSelected && "bg-accent-50 ring-2 ring-accent-200"
+        isDragOver &&
+          file.isFolder &&
+          "z-[1] scale-[1.06] bg-accent-50 ring-2 ring-accent-200",
+        isSelected && !isPointerDragging && "bg-accent-50 ring-2 ring-accent-200",
+        fileRowPointerDown && !file.isFolder && "cursor-grab touch-none select-none",
+        isPointerDragging &&
+          !file.isFolder &&
+          "z-20 cursor-grabbing opacity-[0.35] hover:bg-transparent hover:scale-100"
       )}
       data-vaulty-folder-key={file.isFolder ? file.key : undefined}
-      draggable={!file.isFolder}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
-      onDragEnd={handleDragEnd}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDragStart={handleDragStart}
-      onDrop={handleDrop}
+      onPointerDown={fileRowPointerDown}
       style={{ animationDelay: `${animationDelay}ms` }}
     >
       <button
@@ -415,6 +343,7 @@ export default function FileGrid({
   const [contextMenu, setContextMenu] = useState<{ file: BucketFile; position: { x: number; y: number } } | null>(null);
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const [dragGhost, setDragGhost] = useState<DragGhostPayload | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [dropZoneActive, setDropZoneActive] = useState(false);
   const [previewFile, setPreviewFile] = useState<BucketFile | null>(null);
@@ -553,20 +482,38 @@ export default function FileGrid({
     setFocusedIndex(-1);
   }, [prefix]);
 
+  const handleFileDrop = useCallback(
+    (targetFolderKey: string, sourceKey: string) => {
+      const from = sourceKey.trim();
+      if (
+        from.length > 0 &&
+        from !== targetFolderKey &&
+        !targetFolderKey.startsWith(from) &&
+        onMoveFile
+      ) {
+        onMoveFile(from, targetFolderKey);
+      }
+      setDraggingKey(null);
+      setDragOverKey(null);
+      setDragGhost(null);
+    },
+    [onMoveFile],
+  );
+
+  const { suppressActivationUntilRef, onFileRowPointerDown } = usePointerMoveFileToFolder({
+    moveEnabled: Boolean(onMoveFile),
+    onMoveComplete: handleFileDrop,
+    setDraggingKey,
+    setDragOverKey,
+    setDragGhost,
+  });
+
   function handleContainerClick() {
     setContextMenu(null);
   }
 
-  function handleFileDrop(targetFolderKey: string, sourceKey: string) {
-    // Prefer the explicit key from dataTransfer; fall back to React state
-    // for the rare case the source forgot to set text/plain.
-    const from = sourceKey || draggingKey || "";
-    if (from && from !== targetFolderKey && !targetFolderKey.startsWith(from)
-        && onMoveFile) {
-      onMoveFile(from, targetFolderKey);
-    }
-    setDraggingKey(null);
-    setDragOverKey(null);
+  function handleContainerDragEnter(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
   }
 
   function handleContainerDragOver(e: DragEvent<HTMLDivElement>) {
@@ -582,7 +529,6 @@ export default function FileGrid({
 
   function handleContainerDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
-    markInAppDrop();
     setDropZoneActive(false);
   }
 
@@ -625,6 +571,7 @@ export default function FileGrid({
           "flex flex-1 flex-col items-center justify-center",
           dropZoneActive && "bg-accent-50 ring-2 ring-inset ring-accent-300"
         )}
+        onDragEnter={handleContainerDragEnter}
         onDragLeave={handleContainerDragLeave}
         onDragOver={handleContainerDragOver}
         onDrop={handleContainerDrop}
@@ -706,9 +653,11 @@ export default function FileGrid({
         ref={containerRef}
         className={clsx(
           "flex flex-1 flex-col overflow-auto p-4 outline-none",
-          dropZoneActive && "bg-accent-50/50 ring-2 ring-inset ring-accent-300"
+          dropZoneActive && "bg-accent-50/50 ring-2 ring-inset ring-accent-300",
+          draggingKey != null && onMoveFile && "select-none"
         )}
         onClick={handleContainerClick}
+        onDragEnter={handleContainerDragEnter}
         onDragLeave={handleContainerDragLeave}
         onDragOver={handleContainerDragOver}
         onDrop={handleContainerDrop}
@@ -723,65 +672,74 @@ export default function FileGrid({
               ? "grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6"
               : "flex flex-col gap-1"
             }>
-              {recentInCurrentBucket.map((file, i) => (
+              {recentInCurrentBucket.map((file, i) => {
+                const moveLabel = displayNameForKey(file.key, prefix);
+                return (
                 <FileItem
+                  key={`recent-${file.key}`}
                   animationDelay={i * 20}
                   file={file}
-                  focused={false}
                   folderColor={colorFor(file.key)}
                   folderStyle={folderStyle}
+                  focused={false}
                   isDragOver={false}
+                  isPointerDragging={draggingKey === file.key}
                   isSelected={selectedKeys.has(file.key)}
                   isSelectionMode={isSelectionMode}
                   isStarred={starredKeys.includes(file.key)}
-                  key={`recent-${file.key}`}
                   onContextMenu={(pos) => setContextMenu({ file, position: pos })}
-                  onDragEnd={() => setDraggingKey(null)}
-                  onDragLeave={() => setDragOverKey(null)}
-                  onDragOver={() => {}}
-                  onDragStart={() => setDraggingKey(file.key)}
-                  onDrop={() => {/* files don't accept drops */}}
+                  onFileRowPointerDown={
+                    onMoveFile
+                      ? (e) => onFileRowPointerDown(file.key, moveLabel, e)
+                      : undefined
+                  }
                   onOpen={() => handleOpenFile(file)}
                   onSelect={(e) => handleFileSelect(file, e)}
                   onToggleStar={() => toggleStar(file.key)}
                   prefix={prefix}
+                  suppressActivationUntilRef={suppressActivationUntilRef}
                   viewMode={viewMode}
                 />
-              ))}
+              );
+              })}
             </div>
           </div>
         )}
 
         {folders.length > 0 && (
           <div className="mb-6 animate-fadeIn">
-            <p className="mb-3 text-[11px] font-medium uppercase tracking-wider text-zinc-400">Folders</p>
+            <div className="mb-3">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-zinc-400">Folders</p>
+              {onMoveFile && (
+                <p className="mt-1 text-[11px] text-zinc-400">
+                  Drag a file onto a folder to move it there.
+                </p>
+              )}
+            </div>
             <div className={viewMode === "grid" 
               ? "grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6"
               : "flex flex-col gap-1"
             }>
               {folders.map((file, i) => (
                 <FileItem
+                  key={file.key}
                   animationDelay={i * 25}
                   childCount={folderChildCounts[file.key]}
                   file={file}
-                  focused={focusedIndex === i}
                   folderColor={colorFor(file.key)}
                   folderStyle={folderStyle}
+                  focused={focusedIndex === i}
                   isDragOver={dragOverKey === file.key}
+                  isPointerDragging={false}
                   isSelected={selectedKeys.has(file.key)}
                   isSelectionMode={isSelectionMode}
                   isStarred={starredKeys.includes(file.key)}
-                  key={file.key}
                   onContextMenu={(pos) => setContextMenu({ file, position: pos })}
-                  onDragEnd={() => setDraggingKey(null)}
-                  onDragLeave={() => setDragOverKey(null)}
-                  onDragOver={() => setDragOverKey(file.key)}
-                  onDragStart={() => setDraggingKey(file.key)}
-                  onDrop={(sourceKey) => handleFileDrop(file.key, sourceKey)}
                   onOpen={() => onOpenFolder(file.key)}
                   onSelect={(e) => handleFileSelect(file, e)}
                   onToggleStar={() => toggleStar(file.key)}
                   prefix={prefix}
+                  suppressActivationUntilRef={suppressActivationUntilRef}
                   viewMode={viewMode}
                 />
               ))}
@@ -796,30 +754,35 @@ export default function FileGrid({
               ? "grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6"
               : "flex flex-col gap-1"
             }>
-              {regularFiles.map((file, i) => (
+              {regularFiles.map((file, i) => {
+                const moveLabel = displayNameForKey(file.key, prefix);
+                return (
                 <FileItem
+                  key={file.key}
                   animationDelay={i * 20}
                   file={file}
-                  focused={focusedIndex === folders.length + i}
                   folderStyle={folderStyle}
+                  focused={focusedIndex === folders.length + i}
                   isDragOver={false}
+                  isPointerDragging={draggingKey === file.key}
                   isSelected={selectedKeys.has(file.key)}
                   isSelectionMode={isSelectionMode}
                   isStarred={starredKeys.includes(file.key)}
-                  key={file.key}
                   onContextMenu={(pos) => setContextMenu({ file, position: pos })}
-                  onDragEnd={() => setDraggingKey(null)}
-                  onDragLeave={() => {}}
-                  onDragOver={() => {}}
-                  onDragStart={() => setDraggingKey(file.key)}
-                  onDrop={() => {/* files don't accept drops */}}
+                  onFileRowPointerDown={
+                    onMoveFile
+                      ? (e) => onFileRowPointerDown(file.key, moveLabel, e)
+                      : undefined
+                  }
                   onOpen={() => handleOpenFile(file)}
                   onSelect={(e) => handleFileSelect(file, e)}
                   onToggleStar={() => toggleStar(file.key)}
                   prefix={prefix}
+                  suppressActivationUntilRef={suppressActivationUntilRef}
                   viewMode={viewMode}
                 />
-              ))}
+              );
+              })}
             </div>
           </div>
         )}
@@ -842,6 +805,20 @@ export default function FileGrid({
             onShowVersions={onShowVersions}
             position={contextMenu.position}
           />
+        )}
+
+        {dragGhost != null && (
+          <div
+            aria-hidden
+            className="pointer-events-none fixed z-[200] max-w-[min(17rem,calc(100vw-1.5rem))] rounded-md border-[0.5px] border-accent-200 bg-white px-3 py-2 animate-fadeIn"
+            style={{
+              left: dragGhost.x,
+              top: dragGhost.y,
+              transform: "translate(14px, 14px)",
+            }}
+          >
+            <p className="truncate text-xs font-medium text-zinc-900">{dragGhost.label}</p>
+          </div>
         )}
 
         {dropZoneActive && (

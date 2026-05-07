@@ -36,9 +36,3 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 walkdir = "2"
-
-# Native drag-out (macOS only). On Windows/Linux we fall back to
-# "Reveal in Finder"-style behaviour from the frontend.
-[target.'cfg(target_os = "macos")'.dependencies]
-cocoa = "0.26"
-objc = "0.2"

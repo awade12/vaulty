@@ -208,6 +208,7 @@ export default function QuickPreview({
             <img 
               alt={name} 
               className="max-h-full max-w-full rounded-md object-contain" 
+              draggable={false}
               src={previewUrl} 
             />
           )}
