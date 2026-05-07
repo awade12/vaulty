@@ -11,8 +11,7 @@ Download the latest build for your OS from the
 
 | Platform | File |
 |---|---|
-| macOS (Apple Silicon) | `vaulty_*_aarch64.dmg` |
-| macOS (Intel) | `vaulty_*_x64.dmg` |
+| macOS (Apple Silicon + Intel, universal) | `vaulty_*_universal.dmg` |
 | Windows | `vaulty_*_x64-setup.exe` |
 | Linux | `vaulty_*_amd64.AppImage` |
 
