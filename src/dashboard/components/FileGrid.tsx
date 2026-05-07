@@ -159,13 +159,20 @@ function FileItem({
 
   function handleDragStart(e: DragEvent) {
     e.dataTransfer.setData("text/plain", file.key);
-    e.dataTransfer.effectAllowed = "copy";
+    e.dataTransfer.effectAllowed = "move";
     onDragStart();
-    // Fire-and-forget native drag-out. For small files this typically
-    // upgrades the in-app drag into an OS-level drag before the user
-    // releases; for larger files the Rust side falls back to revealing the
-    // staged file in Finder. Errors are surfaced via toast inside the hook.
-    if (!file.isFolder) {
+  }
+
+  function handleDragEnd(e: DragEvent) {
+    // If the HTML5 drag wasn't accepted by anything inside Vaulty, the OS
+    // reports `dropEffect === "none"`. Treat that as "user wanted to drag
+    // out" and stage the file for them. We avoid triggering this for
+    // folders (we don't support folder export yet) and for successful
+    // in-app folder drops (dropEffect would be "move").
+    const wentOutside =
+      !file.isFolder && e.dataTransfer.dropEffect === "none";
+    onDragEnd();
+    if (wentOutside) {
       void startNativeDragExport(file.key);
     }
   }
@@ -205,7 +212,7 @@ function FileItem({
         draggable={!file.isFolder}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
-        onDragEnd={onDragEnd}
+        onDragEnd={handleDragEnd}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDragStart={handleDragStart}
