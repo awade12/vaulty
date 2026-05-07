@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { clsx } from "clsx";
 
+import { FOLDER_COLORS, FOLDER_COLOR_ORDER, type FolderColor } from "../../lib/folderStyle";
 import type { BucketFile } from "../../types";
 
 function EyeIcon({ className }: { className?: string }) {
@@ -113,7 +114,42 @@ interface FileContextMenuProps {
   onShowVersions?: (file: BucketFile) => void;
   onDeleteFile?: (file: BucketFile) => void;
   onRecursiveDeleteFolder?: (file: BucketFile) => void;
+  onSetFolderColor?: (file: BucketFile, color: FolderColor) => void;
+  currentFolderColor?: FolderColor;
   isActionPending?: boolean;
+}
+
+interface FolderColorPickerProps {
+  current: FolderColor;
+  onPick: (color: FolderColor) => void;
+}
+
+function FolderColorPicker({ current, onPick }: FolderColorPickerProps) {
+  return (
+    <div className="px-3 py-2">
+      <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-zinc-400">Color</p>
+      <div className="flex flex-wrap gap-1.5">
+        {FOLDER_COLOR_ORDER.map((c) => {
+          const tokens = FOLDER_COLORS[c];
+          const active = current === c;
+          return (
+            <button
+              aria-label={tokens.label}
+              className={clsx(
+                "h-5 w-5 rounded-full transition-all",
+                tokens.swatch,
+                active ? "ring-2 ring-offset-1 ring-zinc-900" : "hover:scale-110",
+              )}
+              key={c}
+              onClick={() => onPick(c)}
+              title={tokens.label}
+              type="button"
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export default function FileContextMenu({
@@ -129,6 +165,8 @@ export default function FileContextMenu({
   onShowVersions,
   onDeleteFile,
   onRecursiveDeleteFolder,
+  onSetFolderColor,
+  currentFolderColor = "default",
   isActionPending,
 }: FileContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -186,6 +224,18 @@ export default function FileContextMenu({
               label="Open folder"
               onClick={handleAction(() => onOpenFolder(file.key))}
             />
+          )}
+          {onSetFolderColor && (
+            <>
+              <Divider />
+              <FolderColorPicker
+                current={currentFolderColor}
+                onPick={(color) => {
+                  onSetFolderColor(file, color);
+                  onClose();
+                }}
+              />
+            </>
           )}
           {onRecursiveDeleteFolder && (
             <>

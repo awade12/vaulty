@@ -1,5 +1,12 @@
 import { clsx } from "clsx";
 
+import {
+  FOLDER_COLORS,
+  FOLDER_STYLES,
+  type FolderColor,
+  type FolderStyle,
+} from "../../lib/folderStyle";
+
 type FileType = "folder" | "image" | "video" | "audio" | "pdf" | "archive" | "code" | "document" | "spreadsheet" | "generic";
 
 const EXT_MAP: Record<string, FileType> = {
@@ -129,28 +136,55 @@ interface FileTypeIconProps {
   isFolder: boolean;
   size?: "sm" | "md" | "lg";
   bare?: boolean;
+  folderColor?: FolderColor;
+  folderStyle?: FolderStyle;
 }
 
-export default function FileTypeIcon({ filename, isFolder, size = "md", bare = false }: FileTypeIconProps) {
+export default function FileTypeIcon({
+  filename,
+  isFolder,
+  size = "md",
+  bare = false,
+  folderColor = "default",
+  folderStyle = "classic",
+}: FileTypeIconProps) {
   const fileType = isFolder ? "folder" : getFileType(filename);
-  const colors = TYPE_COLORS[fileType];
   const Icon = TYPE_ICONS[fileType];
-  
+
   const sizeMap = {
-    sm: { wrapper: "h-6 w-6", icon: "h-3 w-3", radius: "rounded-md" },
-    md: { wrapper: "h-8 w-8", icon: "h-4 w-4", radius: "rounded-lg" },
-    lg: { wrapper: "h-12 w-12", icon: "h-6 w-6", radius: "rounded-xl" },
+    sm: { wrapper: "h-6 w-6", icon: "h-3 w-3" },
+    md: { wrapper: "h-8 w-8", icon: "h-4 w-4" },
+    lg: { wrapper: "h-12 w-12", icon: "h-6 w-6" },
   };
-  
   const s = sizeMap[size];
 
+  let bgClass: string;
+  let iconClass: string;
+  let radiusClass: string;
+  let ringClass = "";
+
+  if (isFolder) {
+    const folderTokens = FOLDER_COLORS[folderColor];
+    const styleTokens = FOLDER_STYLES[folderStyle];
+    radiusClass = styleTokens.radius[size];
+    bgClass = styleTokens.background ? styleTokens.background(folderTokens) : folderTokens.bg;
+    iconClass = folderTokens.icon;
+    ringClass = styleTokens.ring ?? "";
+  } else {
+    const colors = TYPE_COLORS[fileType];
+    const defaultRadius = { sm: "rounded-md", md: "rounded-lg", lg: "rounded-xl" }[size];
+    radiusClass = defaultRadius;
+    bgClass = colors.bg;
+    iconClass = colors.icon;
+  }
+
   if (bare) {
-    return <Icon className={clsx(s.icon, colors.icon)} />;
+    return <Icon className={clsx(s.icon, iconClass)} />;
   }
 
   return (
-    <div className={clsx("flex shrink-0 items-center justify-center", s.wrapper, s.radius, colors.bg)}>
-      <Icon className={clsx(s.icon, colors.icon)} />
+    <div className={clsx("flex shrink-0 items-center justify-center", s.wrapper, radiusClass, bgClass, ringClass)}>
+      <Icon className={clsx(s.icon, iconClass)} />
     </div>
   );
 }

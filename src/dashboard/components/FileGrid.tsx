@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 
 import { clsx } from "clsx";
 
+import type { FolderColor, FolderStyle } from "../../lib/folderStyle";
 import { displayNameForKey, formatBytes, formatRelativeTime } from "../../lib/utils";
 import { useBucketStore, type ViewMode } from "../../store/bucketStore";
+import { useFolderStyleStore } from "../../store/folderStyleStore";
 import type { BucketFile } from "../../types";
 import EmptyStateIllustration from "./EmptyStateIllustration";
 import FileContextMenu from "./FileContextMenu";
@@ -75,6 +77,8 @@ interface FileItemProps {
   viewMode: ViewMode;
   isDragOver: boolean;
   childCount?: number;
+  folderColor?: FolderColor;
+  folderStyle: FolderStyle;
   onOpen: () => void;
   onSelect: (e: MouseEvent) => void;
   onContextMenu: (position: { x: number; y: number }) => void;
@@ -96,6 +100,8 @@ function FileItem({
   viewMode,
   isDragOver,
   childCount,
+  folderColor = "default",
+  folderStyle,
   onOpen,
   onSelect,
   onContextMenu,
@@ -105,7 +111,8 @@ function FileItem({
   onDragLeave,
   onDrop,
   onToggleStar,
-}: FileItemProps) {
+  animationDelay = 0,
+}: FileItemProps & { animationDelay?: number }) {
   const name = displayNameForKey(file.key, prefix);
 
   function handleClick(e: MouseEvent) {
@@ -160,7 +167,8 @@ function FileItem({
     return (
       <div
         className={clsx(
-          "group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 hover:bg-zinc-50",
+          "group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-all duration-150 ease-out hover:bg-zinc-50",
+          "animate-list-item-in",
           focused && "ring-2 ring-accent-700",
           isDragOver && file.isFolder && "bg-accent-100 ring-2 ring-accent-400",
           isSelected && "bg-accent-50"
@@ -173,21 +181,29 @@ function FileItem({
         onDragOver={handleDragOver}
         onDragStart={handleDragStart}
         onDrop={handleDrop}
+        style={{ animationDelay: `${animationDelay}ms` }}
       >
         <button
           className={clsx(
-            "flex h-5 w-5 shrink-0 items-center justify-center rounded border-[0.5px] transition-colors",
+            "flex h-5 w-5 shrink-0 items-center justify-center rounded border-[0.5px] transition-all duration-150",
             isSelected
-              ? "border-accent-700 bg-accent-700 text-white"
-              : "border-zinc-300 bg-white opacity-0 group-hover:opacity-100",
-            isSelectionMode && "opacity-100"
+              ? "border-accent-700 bg-accent-700 text-white scale-110"
+              : "border-zinc-300 bg-white opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100",
+            isSelectionMode && "opacity-100 scale-100"
           )}
           onClick={handleCheckboxClick}
           type="button"
         >
-          {isSelected && <CheckIcon className="h-3 w-3" />}
+          {isSelected && <CheckIcon className="h-3 w-3 animate-[checkIn_0.15s_ease-out]" />}
         </button>
-        <FileThumbnail fileKey={file.key} filename={name} isFolder={file.isFolder} size="sm" />
+        <FileThumbnail
+          fileKey={file.key}
+          filename={name}
+          folderColor={folderColor}
+          folderStyle={folderStyle}
+          isFolder={file.isFolder}
+          size="sm"
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <p className="truncate text-sm text-zinc-900">{name}</p>
@@ -221,7 +237,8 @@ function FileItem({
   return (
     <div
       className={clsx(
-        "group relative flex cursor-pointer flex-col items-center rounded-xl p-3 hover:bg-zinc-50",
+        "group relative flex cursor-pointer flex-col items-center rounded-xl p-3 transition-all duration-150 ease-out hover:bg-zinc-50 hover:scale-[1.02]",
+        "animate-file-item-in",
         focused && "ring-2 ring-accent-700",
         isDragOver && file.isFolder && "bg-accent-100 ring-2 ring-accent-400",
         isSelected && "bg-accent-50 ring-2 ring-accent-200"
@@ -234,19 +251,20 @@ function FileItem({
       onDragOver={handleDragOver}
       onDragStart={handleDragStart}
       onDrop={handleDrop}
+      style={{ animationDelay: `${animationDelay}ms` }}
     >
       <button
         className={clsx(
-          "absolute left-2 top-2 flex h-5 w-5 items-center justify-center rounded border-[0.5px] transition-colors",
+          "absolute left-2 top-2 flex h-5 w-5 items-center justify-center rounded border-[0.5px] transition-all duration-150",
           isSelected
-            ? "border-accent-700 bg-accent-700 text-white"
-            : "border-zinc-300 bg-white opacity-0 group-hover:opacity-100",
-          isSelectionMode && "opacity-100"
+            ? "border-accent-700 bg-accent-700 text-white scale-110"
+            : "border-zinc-300 bg-white opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100",
+          isSelectionMode && "opacity-100 scale-100"
         )}
         onClick={handleCheckboxClick}
         type="button"
       >
-        {isSelected && <CheckIcon className="h-3 w-3" />}
+        {isSelected && <CheckIcon className="h-3 w-3 animate-[checkIn_0.15s_ease-out]" />}
       </button>
       {isStarred && (
         <div className="absolute right-2 top-2">
@@ -254,7 +272,14 @@ function FileItem({
         </div>
       )}
       <div className="mb-2">
-        <FileThumbnail fileKey={file.key} filename={name} isFolder={file.isFolder} size="lg" />
+        <FileThumbnail
+          fileKey={file.key}
+          filename={name}
+          folderColor={folderColor}
+          folderStyle={folderStyle}
+          isFolder={file.isFolder}
+          size="lg"
+        />
       </div>
       <span className="w-full truncate text-center text-xs font-medium text-zinc-900">{name}</span>
       {file.isFolder && childCount !== undefined && childCount > 0 ? (
@@ -351,6 +376,26 @@ export default function FileGrid({
   const recentFiles = useBucketStore((s) => s.recentFiles);
   const activeConnectionId = useBucketStore((s) => s.activeConnectionId);
   const addRecentFile = useBucketStore((s) => s.addRecentFile);
+  const folderStyle = useFolderStyleStore((s) => s.folderStyle);
+  const folderColors = useFolderStyleStore((s) => s.folderColors);
+  const setFolderColor = useFolderStyleStore((s) => s.setFolderColor);
+  const clearFolderColor = useFolderStyleStore((s) => s.clearFolderColor);
+
+  const colorFor = useCallback(
+    (key: string): FolderColor => {
+      const ck = `${activeConnectionId ?? "_"}::${key}`;
+      return folderColors[ck] ?? "default";
+    },
+    [folderColors, activeConnectionId],
+  );
+
+  function handleSetFolderColor(file: BucketFile, color: FolderColor) {
+    if (color === "default") {
+      clearFolderColor(activeConnectionId, file.key);
+    } else {
+      setFolderColor(activeConnectionId, file.key, color);
+    }
+  }
 
   const folders = files.filter((f) => f.isFolder);
   const regularFiles = files.filter((f) => !f.isFolder);
@@ -539,7 +584,7 @@ export default function FileGrid({
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
       {isSelectionMode && (
-        <div className="flex shrink-0 items-center gap-3 border-b border-[0.5px] border-zinc-200 bg-accent-50 px-4 py-2">
+        <div className="flex shrink-0 items-center gap-3 border-b border-[0.5px] border-zinc-200 bg-accent-50 px-4 py-2 animate-[slideDown_0.2s_ease-out]">
           <span className="text-sm font-medium text-accent-700">
             {selectedKeys.size} selected
           </span>
@@ -548,7 +593,7 @@ export default function FileGrid({
           </span>
           <div className="flex-1" />
           <button
-            className="rounded-lg px-3 py-1.5 text-xs text-zinc-600 hover:bg-white"
+            className="rounded-lg px-3 py-1.5 text-xs text-zinc-600 hover:bg-white transition-colors"
             onClick={onSelectAll}
             type="button"
           >
@@ -556,7 +601,7 @@ export default function FileGrid({
           </button>
           {onBulkDownload && (
             <button
-              className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+              className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
               onClick={() => onBulkDownload(Array.from(selectedKeys))}
               type="button"
             >
@@ -566,7 +611,7 @@ export default function FileGrid({
           )}
           {onZipDownload && selectedKeys.size > 1 && (
             <button
-              className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+              className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
               onClick={() => onZipDownload(Array.from(selectedKeys))}
               type="button"
             >
@@ -576,7 +621,7 @@ export default function FileGrid({
           )}
           {onBulkDelete && (
             <button
-              className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs text-red-500 hover:bg-red-50"
+              className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 transition-colors"
               onClick={() => onBulkDelete(Array.from(selectedKeys))}
               type="button"
             >
@@ -585,7 +630,7 @@ export default function FileGrid({
             </button>
           )}
           <button
-            className="rounded-lg px-3 py-1.5 text-xs text-zinc-500 hover:bg-white hover:text-zinc-700"
+            className="rounded-lg px-3 py-1.5 text-xs text-zinc-500 hover:bg-white hover:text-zinc-700 transition-colors"
             onClick={onClearSelection}
             type="button"
           >
@@ -608,16 +653,19 @@ export default function FileGrid({
       >
 
         {recentInCurrentBucket.length > 0 && prefix === "" && (
-          <div className="mb-6">
+          <div className="mb-6 animate-fadeIn">
             <p className="mb-3 text-[11px] font-medium uppercase tracking-wider text-zinc-400">Recent</p>
             <div className={viewMode === "grid" 
               ? "grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6"
               : "flex flex-col gap-1"
             }>
-              {recentInCurrentBucket.map((file) => (
+              {recentInCurrentBucket.map((file, i) => (
                 <FileItem
+                  animationDelay={i * 20}
                   file={file}
                   focused={false}
+                  folderColor={colorFor(file.key)}
+                  folderStyle={folderStyle}
                   isDragOver={false}
                   isSelected={selectedKeys.has(file.key)}
                   isSelectionMode={isSelectionMode}
@@ -641,7 +689,7 @@ export default function FileGrid({
         )}
 
         {folders.length > 0 && (
-          <div className="mb-6">
+          <div className="mb-6 animate-fadeIn">
             <p className="mb-3 text-[11px] font-medium uppercase tracking-wider text-zinc-400">Folders</p>
             <div className={viewMode === "grid" 
               ? "grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6"
@@ -649,9 +697,12 @@ export default function FileGrid({
             }>
               {folders.map((file, i) => (
                 <FileItem
+                  animationDelay={i * 25}
                   childCount={folderChildCounts[file.key]}
                   file={file}
                   focused={focusedIndex === i}
+                  folderColor={colorFor(file.key)}
+                  folderStyle={folderStyle}
                   isDragOver={dragOverKey === file.key}
                   isSelected={selectedKeys.has(file.key)}
                   isSelectionMode={isSelectionMode}
@@ -675,7 +726,7 @@ export default function FileGrid({
         )}
 
         {regularFiles.length > 0 && (
-          <div>
+          <div className="animate-fadeIn">
             <p className="mb-3 text-[11px] font-medium uppercase tracking-wider text-zinc-400">Files</p>
             <div className={viewMode === "grid" 
               ? "grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6"
@@ -683,8 +734,10 @@ export default function FileGrid({
             }>
               {regularFiles.map((file, i) => (
                 <FileItem
+                  animationDelay={i * 20}
                   file={file}
                   focused={focusedIndex === folders.length + i}
+                  folderStyle={folderStyle}
                   isDragOver={false}
                   isSelected={selectedKeys.has(file.key)}
                   isSelectionMode={isSelectionMode}
@@ -709,6 +762,7 @@ export default function FileGrid({
 
         {contextMenu && (
           <FileContextMenu
+            currentFolderColor={colorFor(contextMenu.file.key)}
             file={contextMenu.file}
             isActionPending={isActionPending}
             onClose={() => setContextMenu(null)}
@@ -718,9 +772,10 @@ export default function FileGrid({
             onDuplicateFile={onDuplicateFile}
             onOpenFile={(f) => handleOpenFile(f)}
             onOpenFolder={onOpenFolder}
-            onShowVersions={onShowVersions}
             onRecursiveDeleteFolder={onRecursiveDeleteFolder}
             onRenameFile={onRenameFile}
+            onSetFolderColor={handleSetFolderColor}
+            onShowVersions={onShowVersions}
             position={contextMenu.position}
           />
         )}

@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Tauri update signing keys
+.tauri-update-key.key
+.tauri-update-key.key.pub
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -22,3 +26,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+.cursorignore
+.claude
+
+docs/AUTOUPDATE.md

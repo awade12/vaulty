@@ -24,6 +24,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "resources": ["icons/32x32.png"],
     "icon": [
       "icons/32x32.png",
@@ -32,5 +33,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/awade12/vaulty/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEwRjhFMjNCOUU3QkIxRDAKUldUUXNYdWVPK0w0RUdJRWpuWFJMcDBQcms3cmFiVHVHT3RSQ1M2MkpCV1hlOWFYakgycEsrSGIK"
+    }
   }
 }

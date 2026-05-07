@@ -33,6 +33,62 @@
   }
 }
 
+@keyframes fileItemIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes listItemIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes selectPulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.97);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes checkIn {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @layer base {
   :root {
     font-family:
@@ -61,5 +117,17 @@
   
   .animate-slideIn {
     animation: slideIn 0.2s ease-out;
+  }
+  
+  .animate-file-item-in {
+    animation: fileItemIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  
+  .animate-list-item-in {
+    animation: listItemIn 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  
+  .animate-select-pulse {
+    animation: selectPulse 0.15s cubic-bezier(0.22, 1, 0.36, 1);
   }
 }
