@@ -1,13 +1,27 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { toast } from "sonner";
 
 import { useBucketContents } from "./useBucketContents";
-import { displayNameForKey } from "../lib/utils";
+import { searchObjects } from "../lib/tauri";
+import { displayNameForKey, handleTauriError } from "../lib/utils";
 import { useBucketStore } from "../store/bucketStore";
+import type { BucketFile } from "../types";
+
+export interface BucketSearchState {
+  query: string;
+  results: BucketFile[];
+  scanned: number;
+  truncated: boolean;
+}
 
 export function useDashboardListing() {
   const [prefix, setPrefix] = useState("");
   const [filter, setFilter] = useState("");
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [bucketSearch, setBucketSearch] = useState<BucketSearchState | null>(
+    null,
+  );
+  const [searchBusy, setSearchBusy] = useState(false);
 
   const activeConnectionId = useBucketStore((s) => s.activeConnectionId);
 
@@ -15,6 +29,9 @@ export function useDashboardListing() {
   const files = query.data ?? [];
 
   const visibleFiles = useMemo(() => {
+    if (bucketSearch != null) {
+      return bucketSearch.results;
+    }
     const q = filter.trim().toLowerCase();
     if (q.length === 0) {
       return files;
@@ -22,11 +39,49 @@ export function useDashboardListing() {
     return files.filter((f) =>
       displayNameForKey(f.key, prefix).toLowerCase().includes(q),
     );
-  }, [files, filter, prefix]);
+  }, [files, filter, prefix, bucketSearch]);
 
   useEffect(() => {
     setSelectedKeys(new Set());
   }, [prefix, activeConnectionId]);
+
+  // Leaving the current connection or navigating exits bucket-search mode.
+  useEffect(() => {
+    setBucketSearch(null);
+  }, [activeConnectionId]);
+
+  async function runBucketSearch(): Promise<void> {
+    const q = filter.trim();
+    if (q.length < 2) {
+      toast.error("Type at least 2 characters to search the bucket.");
+      return;
+    }
+    setSearchBusy(true);
+    try {
+      const result = await searchObjects(q, prefix);
+      setBucketSearch({
+        query: q,
+        results: result.matches,
+        scanned: result.scanned,
+        truncated: result.truncated,
+      });
+      if (result.matches.length === 0) {
+        toast.info(`No matches for "${q}" in this bucket.`);
+      } else if (result.truncated) {
+        toast.info(
+          `Showing first ${result.matches.length} matches. Refine your query for more.`,
+        );
+      }
+    } catch (e) {
+      toast.error(handleTauriError(e));
+    } finally {
+      setSearchBusy(false);
+    }
+  }
+
+  function clearBucketSearch(): void {
+    setBucketSearch(null);
+  }
 
   const listedTotal = useMemo(() => {
     return files
@@ -44,10 +99,12 @@ export function useDashboardListing() {
 
   function handleNavigate(nextPrefix: string): void {
     setPrefix(nextPrefix);
+    setBucketSearch(null);
   }
 
   function handleOpenFolder(key: string): void {
     setPrefix(key);
+    setBucketSearch(null);
   }
 
   function handleToggleSelect(key: string): void {
@@ -93,6 +150,10 @@ export function useDashboardListing() {
     listedTotal,
     fileCountInView,
     folderCount,
+    bucketSearch,
+    searchBusy,
+    runBucketSearch,
+    clearBucketSearch,
     handleNavigate,
     handleOpenFolder,
     handleToggleSelect,

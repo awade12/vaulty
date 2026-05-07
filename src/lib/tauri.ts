@@ -44,6 +44,19 @@ export async function listFiles(prefix: string): Promise<BucketFile[]> {
   return invoke<BucketFile[]>("list_files", { prefix });
 }
 
+export interface SearchResult {
+  matches: BucketFile[];
+  scanned: number;
+  truncated: boolean;
+}
+
+export async function searchObjects(
+  query: string,
+  prefix: string,
+): Promise<SearchResult> {
+  return invoke<SearchResult>("search_objects", { query, prefix });
+}
+
 export async function collectUploadCandidates(
   paths: string[],
 ): Promise<LocalUploadItem[]> {

@@ -35,6 +35,7 @@ pub fn run() {
             connection::duplicate_connection,
             connection::check_connection_health,
             bucket::list_files,
+            bucket::search_objects,
             bucket::delete_file,
             bucket::create_folder,
             bucket::get_presigned_url,

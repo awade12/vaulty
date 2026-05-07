@@ -7,6 +7,7 @@ import AppShell from "./components/AppShell";
 import QuickUploadModal from "./components/QuickUploadModal";
 import Dashboard from "./dashboard/Dashboard";
 import { useDesktopQuickActions } from "./hooks/useDesktopQuickActions";
+import { useStartupUpdateCheck } from "./hooks/useStartupUpdateCheck";
 import Settings from "./settings/Settings";
 
 function CheckCircleIcon({ className }: { className?: string }) {
@@ -49,6 +50,7 @@ const queryClient = new QueryClient({
 
 export default function App() {
   useDesktopQuickActions();
+  useStartupUpdateCheck();
 
   return (
     <QueryClientProvider client={queryClient}>

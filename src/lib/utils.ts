@@ -12,13 +12,99 @@ export function formatBytes(bytes: number): string {
 }
 
 export function handleTauriError(error: unknown): string {
-  if (typeof error === "string") {
-    return error;
+  const raw =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : "Unexpected error";
+  return friendlyS3Error(raw);
+}
+
+// Map common AWS / S3 SDK error fragments to human language. We match on
+// substrings that show up in the SDK's stringified errors so this works
+// regardless of whether the error came back as `S3 error: ...` or raw.
+const S3_ERROR_RULES: Array<{ pattern: RegExp; message: string }> = [
+  {
+    pattern: /InvalidAccessKeyId/i,
+    message:
+      "That access key wasn't recognized. Double-check it didn't get truncated when pasting.",
+  },
+  {
+    pattern: /SignatureDoesNotMatch/i,
+    message:
+      "The secret access key doesn't match this access key. Re-paste the secret to be sure.",
+  },
+  {
+    pattern: /AccessDenied|Forbidden|403/i,
+    message:
+      "Access denied. Your credentials are valid but don't have permission for this bucket or object.",
+  },
+  {
+    pattern: /NoSuchBucket/i,
+    message:
+      "That bucket doesn't exist (or your credentials can't see it). Check the bucket name and the endpoint.",
+  },
+  {
+    pattern: /NoSuchKey|key does not exist/i,
+    message: "That object doesn't exist (it may have just been deleted).",
+  },
+  {
+    pattern: /BucketAlreadyExists|BucketAlreadyOwnedByYou/i,
+    message: "A bucket with that name already exists.",
+  },
+  {
+    pattern: /RequestTimeTooSkewed/i,
+    message:
+      "Your computer's clock is too far off from the server. Sync your system time and try again.",
+  },
+  {
+    pattern: /InvalidBucketName/i,
+    message:
+      "Bucket name is invalid (must be 3–63 chars, lowercase, no underscores or spaces).",
+  },
+  {
+    pattern: /SlowDown|TooManyRequests|429/i,
+    message:
+      "The provider is rate-limiting requests. Wait a few seconds and try again.",
+  },
+  {
+    pattern: /EntityTooLarge/i,
+    message:
+      "The file exceeds this provider's single-object size limit. Try splitting it.",
+  },
+  {
+    pattern: /dispatch failure|dns error|name resolution failed/i,
+    message:
+      "Couldn't reach the endpoint. Check your internet connection and that the endpoint URL is correct.",
+  },
+  {
+    pattern: /tls handshake|certificate/i,
+    message:
+      "TLS error connecting to the endpoint. The hostname or certificate may be misconfigured.",
+  },
+  {
+    pattern: /timed? out|timeout/i,
+    message: "The request timed out. The connection or server is slow.",
+  },
+  {
+    pattern: /Read-only file system|os error 30/i,
+    message:
+      "Couldn't write to disk because the location is read-only. On macOS, drag Vaulty.app from the DMG into /Applications first.",
+  },
+  {
+    pattern: /No active connection/i,
+    message: "No bucket selected yet — pick one from Settings to get started.",
+  },
+];
+
+export function friendlyS3Error(raw: string): string {
+  for (const rule of S3_ERROR_RULES) {
+    if (rule.pattern.test(raw)) {
+      return rule.message;
+    }
   }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return "Unexpected error";
+  return raw;
 }
 
 export function displayNameForKey(key: string, prefix: string): string {

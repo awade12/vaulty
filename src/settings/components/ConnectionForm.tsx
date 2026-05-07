@@ -1,7 +1,13 @@
-import { useRef, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
 import type { ConnectionConfig, ListBucketsCredentials } from "../../types";
+import {
+  PROVIDER_PRESETS,
+  applyPreset,
+  detectPreset,
+  type PresetField,
+} from "../providerPresets";
 
 function PlusIcon({ className }: { className?: string }) {
   return (
@@ -51,6 +57,53 @@ export default function ConnectionForm({
 }: ConnectionFormProps) {
   const isEdit = draft != null;
   const formRef = useRef<HTMLFormElement>(null);
+
+  // Pick a sensible default preset: when editing, detect from existing
+  // endpoint; otherwise default to R2 (most common case for this app).
+  const initialPreset =
+    (draft != null ? detectPreset(draft.endpoint) : null) ??
+    PROVIDER_PRESETS[0]!;
+  const [presetId, setPresetId] = useState<string>(initialPreset.id);
+  const preset =
+    PROVIDER_PRESETS.find((p) => p.id === presetId) ?? initialPreset;
+
+  // Per-preset placeholder values (account ID, region, custom host).
+  const [presetValues, setPresetValues] = useState<
+    Partial<Record<PresetField, string>>
+  >({});
+  // Endpoint shown in the input — synthesized from preset + values, or
+  // overridden when the user types into it directly.
+  const [endpoint, setEndpoint] = useState<string>(draft?.endpoint ?? "");
+  const [endpointTouched, setEndpointTouched] = useState<boolean>(
+    draft != null,
+  );
+  const [region, setRegion] = useState<string>(
+    draft?.region ?? preset.defaultRegion,
+  );
+
+  // When the preset changes, reset placeholder values, region default, and
+  // the synthesized endpoint (unless the user already edited it manually).
+  useEffect(() => {
+    setPresetValues({});
+    if (!endpointTouched) {
+      setEndpoint("");
+    }
+    setRegion(preset.defaultRegion);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetId]);
+
+  // Re-synthesize endpoint as preset placeholders are filled in.
+  useEffect(() => {
+    if (endpointTouched) return;
+    const applied = applyPreset(preset, presetValues);
+    setEndpoint(applied.endpoint);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetValues, presetId]);
+
+  function handlePresetFieldChange(key: PresetField, value: string): void {
+    setPresetValues((prev) => ({ ...prev, [key]: value }));
+    if (key === "region") setRegion(value);
+  }
 
   function handleDiscoverClick(): void {
     if (onDiscoverRequest == null) {
@@ -133,25 +186,65 @@ export default function ConnectionForm({
         />
         <select
           className={inputClass}
-          defaultValue={draft?.provider ?? "r2"}
-          name="provider"
+          name="presetId"
+          onChange={(e) => setPresetId(e.target.value)}
+          value={presetId}
         >
-          <option value="r2">Cloudflare R2</option>
-          <option value="minio">MinIO</option>
-          <option value="s3">Amazon S3</option>
+          {PROVIDER_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
         </select>
+        <p className="text-[11px] leading-snug text-zinc-400">
+          {preset.description}
+          {preset.docsUrl != null && (
+            <>
+              {" "}
+              <a
+                className="text-accent-700 underline-offset-2 hover:underline"
+                href={preset.docsUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Docs
+              </a>
+            </>
+          )}
+        </p>
+        {/* `provider` is always sent as the canonical id (r2/s3/minio). */}
+        <input name="provider" type="hidden" value={preset.provider} />
       </div>
 
       <div className="flex flex-col gap-2">
         <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
           Connection
         </label>
+        {preset.fields.map((f) => (
+          <div className="flex flex-col gap-1" key={f.key}>
+            <input
+              className={inputClass}
+              onChange={(e) => handlePresetFieldChange(f.key, e.target.value)}
+              placeholder={f.placeholder}
+              type="text"
+              value={presetValues[f.key] ?? ""}
+            />
+            {f.helper != null && (
+              <p className="text-[11px] text-zinc-400">{f.helper}</p>
+            )}
+          </div>
+        ))}
         <input
           className={inputClass}
-          defaultValue={draft?.endpoint ?? ""}
           name="endpoint"
-          placeholder="abc123.r2.cloudflarestorage.com"
+          onChange={(e) => {
+            setEndpoint(e.target.value);
+            setEndpointTouched(true);
+          }}
+          placeholder="endpoint.example.com"
+          title="Auto-filled from your provider preset. Edit only if you need a custom endpoint."
           type="text"
+          value={endpoint}
         />
         <div className="flex gap-2">
           <input
@@ -163,10 +256,11 @@ export default function ConnectionForm({
           />
           <input
             className={inputClass}
-            defaultValue={draft?.region ?? ""}
             name="region"
-            placeholder="Region (auto)"
+            onChange={(e) => setRegion(e.target.value)}
+            placeholder={preset.defaultRegion || "Region (auto)"}
             type="text"
+            value={region}
           />
         </div>
       </div>

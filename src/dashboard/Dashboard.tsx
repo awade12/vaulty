@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from "react";
+import { useState, type ChangeEvent, type KeyboardEvent } from "react";
 
 import { clsx } from "clsx";
 
@@ -148,6 +148,16 @@ export default function Dashboard() {
     d.handleFilterChange(e);
   }
 
+  function handleSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void d.runBucketSearch();
+    } else if (e.key === "Escape" && d.bucketSearch != null) {
+      e.preventDefault();
+      d.clearBucketSearch();
+    }
+  }
+
   function handleShowVersions(file: BucketFile) {
     setVersionFile(file);
   }
@@ -168,13 +178,23 @@ export default function Dashboard() {
               <div className="relative">
                 <SearchIcon className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                 <input
-                  className="w-48 rounded-lg border-0 bg-zinc-100 py-1.5 pl-9 pr-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-accent-200 transition-all"
+                  className="w-56 rounded-lg border-0 bg-zinc-100 py-1.5 pl-9 pr-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-accent-200 transition-all"
                   onChange={handleSearchChange}
-                  placeholder="Search…"
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="Filter — Enter to search bucket"
                   type="search"
                   value={d.filter}
                 />
               </div>
+              <button
+                className="rounded-lg border border-[0.5px] border-zinc-200 bg-white px-2.5 py-1.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-800 disabled:opacity-40"
+                disabled={d.searchBusy || d.filter.trim().length < 2}
+                onClick={() => void d.runBucketSearch()}
+                title="Search the entire bucket recursively"
+                type="button"
+              >
+                {d.searchBusy ? "Searching…" : "Search bucket"}
+              </button>
               <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
                 <button
                   className={clsx(
@@ -229,6 +249,30 @@ export default function Dashboard() {
               </button>
             </div>
           </header>
+
+          {d.bucketSearch != null && (
+            <div className="flex items-center justify-between gap-3 border-b border-[0.5px] border-zinc-200 bg-amber-50 px-4 py-2 text-xs text-zinc-700">
+              <div className="min-w-0">
+                <span className="font-medium">Search results</span>
+                <span className="ml-2 text-zinc-500">
+                  {d.bucketSearch.results.length} match
+                  {d.bucketSearch.results.length === 1 ? "" : "es"} for{" "}
+                  <span className="font-mono">"{d.bucketSearch.query}"</span>
+                  {" · "}
+                  scanned {d.bucketSearch.scanned.toLocaleString()} object
+                  {d.bucketSearch.scanned === 1 ? "" : "s"}
+                  {d.bucketSearch.truncated && " (truncated — refine to see more)"}
+                </span>
+              </div>
+              <button
+                className="shrink-0 rounded-md border border-[0.5px] border-zinc-200 bg-white px-2 py-1 text-[11px] text-zinc-600 hover:bg-zinc-50"
+                onClick={d.clearBucketSearch}
+                type="button"
+              >
+                Back to folder
+              </button>
+            </div>
+          )}
 
           <div className="flex min-h-0 flex-1 overflow-hidden">
             <FileGrid

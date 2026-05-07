@@ -133,6 +133,88 @@ pub async fn list_objects(
     Ok(out)
 }
 
+/// Recursively list objects under `prefix` (no `/` delimiter so we get every
+/// nested key) and return those whose key contains `query` (case-insensitive).
+///
+/// Caps:
+/// - `max_matches`: stop collecting matches after this many.
+/// - `max_scanned`: hard cap on objects examined regardless of matches, so we
+///   bail before paging through enormous buckets.
+///
+/// Returns `(matches, scanned, truncated)`. `truncated` is true when either
+/// cap kicked in before the listing was complete — the UI can use this to
+/// show a "first N results, refine to narrow" hint.
+pub async fn search_objects_recursive(
+    client: &Client,
+    bucket: &str,
+    prefix: &str,
+    query: &str,
+    max_matches: usize,
+    max_scanned: u32,
+) -> Result<(Vec<BucketFile>, u32, bool), AppError> {
+    let needle = query.to_lowercase();
+    let mut matches: Vec<BucketFile> = Vec::new();
+    let mut scanned: u32 = 0;
+    let mut truncated = false;
+    let mut token: Option<String> = None;
+
+    loop {
+        let mut req = client
+            .list_objects_v2()
+            .bucket(bucket)
+            .prefix(prefix.to_string());
+        if let Some(ref t) = token {
+            req = req.continuation_token(t);
+        }
+        let resp = req.send().await.map_err(map_s3_sdk_error)?;
+
+        for obj in resp.contents() {
+            scanned = scanned.saturating_add(1);
+            let key = obj.key().unwrap_or("").to_string();
+            if key.is_empty() || key.ends_with('/') {
+                continue;
+            }
+            if key.to_lowercase().contains(&needle) {
+                let size = obj.size().unwrap_or(0) as u64;
+                let last_modified = obj
+                    .last_modified()
+                    .map(|t| t.to_string())
+                    .unwrap_or_default();
+                let etag = obj.e_tag().map(|s| s.to_string()).unwrap_or_default();
+                matches.push(BucketFile {
+                    key,
+                    size,
+                    last_modified,
+                    etag,
+                    is_folder: false,
+                });
+                if matches.len() >= max_matches {
+                    truncated = true;
+                    break;
+                }
+            }
+            if scanned >= max_scanned {
+                truncated = true;
+                break;
+            }
+        }
+
+        if truncated {
+            break;
+        }
+        if resp.is_truncated() == Some(true) {
+            token = resp.next_continuation_token().map(|s| s.to_string());
+            if token.is_none() {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    Ok((matches, scanned, truncated))
+}
+
 fn copy_source_for_key(bucket: &str, key: &str) -> String {
     let enc: String = key
         .split('/')
