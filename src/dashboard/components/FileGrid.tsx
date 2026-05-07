@@ -117,7 +117,8 @@ interface FileItemProps {
   onDragEnd: () => void;
   onDragOver: () => void;
   onDragLeave: () => void;
-  onDrop: () => void;
+  /** Receives the dragged source key (S3 key from `dataTransfer`). */
+  onDrop: (sourceKey: string) => void;
   onToggleStar: () => void;
 }
 
@@ -186,11 +187,16 @@ function FileItem({
   }
 
   function handleDragOver(e: DragEvent) {
-    if (file.isFolder) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      onDragOver();
-    }
+    if (!file.isFolder) return;
+    // Only accept HTML5 drags that originated from another Vaulty file.
+    // Tauri 2 doesn't put types on external file drops (those go through
+    // the OS-level event), so a non-empty types list here means an in-app
+    // drag.
+    const types = Array.from(e.dataTransfer.types);
+    if (!types.includes("text/plain")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    onDragOver();
   }
 
   function handleDragLeave() {
@@ -198,9 +204,15 @@ function FileItem({
   }
 
   function handleDrop(e: DragEvent) {
+    if (!file.isFolder) return;
     e.preventDefault();
+    e.stopPropagation();
     markInAppDrop();
-    onDrop();
+    // Read the dragged key directly from dataTransfer rather than relying
+    // on React state, which can be stale across event handlers in
+    // different components.
+    const sourceKey = e.dataTransfer.getData("text/plain");
+    onDrop(sourceKey);
   }
 
   function handleStarClick(e: MouseEvent) {
@@ -545,9 +557,13 @@ export default function FileGrid({
     setContextMenu(null);
   }
 
-  function handleFileDrop(targetFolderKey: string) {
-    if (draggingKey && draggingKey !== targetFolderKey && onMoveFile) {
-      onMoveFile(draggingKey, targetFolderKey);
+  function handleFileDrop(targetFolderKey: string, sourceKey: string) {
+    // Prefer the explicit key from dataTransfer; fall back to React state
+    // for the rare case the source forgot to set text/plain.
+    const from = sourceKey || draggingKey || "";
+    if (from && from !== targetFolderKey && !targetFolderKey.startsWith(from)
+        && onMoveFile) {
+      onMoveFile(from, targetFolderKey);
     }
     setDraggingKey(null);
     setDragOverKey(null);
@@ -724,7 +740,7 @@ export default function FileGrid({
                   onDragLeave={() => setDragOverKey(null)}
                   onDragOver={() => {}}
                   onDragStart={() => setDraggingKey(file.key)}
-                  onDrop={() => {}}
+                  onDrop={() => {/* files don't accept drops */}}
                   onOpen={() => handleOpenFile(file)}
                   onSelect={(e) => handleFileSelect(file, e)}
                   onToggleStar={() => toggleStar(file.key)}
@@ -761,7 +777,7 @@ export default function FileGrid({
                   onDragLeave={() => setDragOverKey(null)}
                   onDragOver={() => setDragOverKey(file.key)}
                   onDragStart={() => setDraggingKey(file.key)}
-                  onDrop={() => handleFileDrop(file.key)}
+                  onDrop={(sourceKey) => handleFileDrop(file.key, sourceKey)}
                   onOpen={() => onOpenFolder(file.key)}
                   onSelect={(e) => handleFileSelect(file, e)}
                   onToggleStar={() => toggleStar(file.key)}
@@ -796,7 +812,7 @@ export default function FileGrid({
                   onDragLeave={() => {}}
                   onDragOver={() => {}}
                   onDragStart={() => setDraggingKey(file.key)}
-                  onDrop={() => {}}
+                  onDrop={() => {/* files don't accept drops */}}
                   onOpen={() => handleOpenFile(file)}
                   onSelect={(e) => handleFileSelect(file, e)}
                   onToggleStar={() => toggleStar(file.key)}
