@@ -67,6 +67,10 @@ jobs:
         with:
           targets: ${{ matrix.rust-target }}
 
+      - name: Add second macOS target for universal build
+        if: matrix.platform == 'macos-14'
+        run: rustup target add x86_64-apple-darwin
+
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
