@@ -57,6 +57,16 @@ export async function searchObjects(
   return invoke<SearchResult>("search_objects", { query, prefix });
 }
 
+export interface DragExportResult {
+  path: string;
+  /** True when the OS file manager was opened instead of a real drag session. */
+  revealedOnly: boolean;
+}
+
+export async function startDragExport(key: string): Promise<DragExportResult> {
+  return invoke<DragExportResult>("start_drag_export", { key });
+}
+
 export async function collectUploadCandidates(
   paths: string[],
 ): Promise<LocalUploadItem[]> {

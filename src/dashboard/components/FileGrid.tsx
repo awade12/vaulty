@@ -1,9 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 
 import { clsx } from "clsx";
+import { toast } from "sonner";
 
 import type { FolderColor, FolderStyle } from "../../lib/folderStyle";
-import { displayNameForKey, formatBytes, formatRelativeTime } from "../../lib/utils";
+import { startDragExport } from "../../lib/tauri";
+import { displayNameForKey, formatBytes, formatRelativeTime, handleTauriError } from "../../lib/utils";
+
+// De-dupe in-flight drag-export prep so a flurry of dragstart events for the
+// same key (which can happen when the user re-grabs a file) only triggers
+// one download. The set is cleared once the export resolves either way.
+const inflightDragExports = new Set<string>();
+
+async function startNativeDragExport(key: string): Promise<void> {
+  if (inflightDragExports.has(key)) return;
+  inflightDragExports.add(key);
+  try {
+    const result = await startDragExport(key);
+    if (result.revealedOnly) {
+      toast.info("Couldn't start the native drag — opened the staged file in Finder instead.");
+    }
+  } catch (e) {
+    toast.error(handleTauriError(e));
+  } finally {
+    inflightDragExports.delete(key);
+  }
+}
 import { useBucketStore, type ViewMode } from "../../store/bucketStore";
 import { useFolderStyleStore } from "../../store/folderStyleStore";
 import type { BucketFile } from "../../types";
@@ -137,8 +159,15 @@ function FileItem({
 
   function handleDragStart(e: DragEvent) {
     e.dataTransfer.setData("text/plain", file.key);
-    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.effectAllowed = "copy";
     onDragStart();
+    // Fire-and-forget native drag-out. For small files this typically
+    // upgrades the in-app drag into an OS-level drag before the user
+    // releases; for larger files the Rust side falls back to revealing the
+    // staged file in Finder. Errors are surfaced via toast inside the hook.
+    if (!file.isFolder) {
+      void startNativeDragExport(file.key);
+    }
   }
 
   function handleDragOver(e: DragEvent) {

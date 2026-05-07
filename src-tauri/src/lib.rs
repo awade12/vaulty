@@ -5,7 +5,7 @@ mod state;
 mod storage;
 mod transfer_emit;
 
-use commands::{bucket, connection, download, object_ops, upload};
+use commands::{bucket, connection, download, drag, object_ops, upload};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -42,6 +42,7 @@ pub fn run() {
             upload::upload_file,
             upload::collect_upload_candidates,
             download::download_file,
+            drag::start_drag_export,
             object_ops::move_object,
             object_ops::delete_objects,
             object_ops::delete_prefix_recursive,

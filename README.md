@@ -35,6 +35,7 @@ applies them silently.
 - **Version history** — view and restore previous versions of objects
 - **Bucket discovery** — list all buckets on an account and add them in bulk
 - **Secure credentials** — secrets stored in the OS keychain via `keyring`, never written to disk in plaintext
+- **Drag out to Finder** *(macOS)* — drag any file from Vaulty straight to your desktop or another app; Vaulty stages the download to a temp folder and hands it off to the OS
 
 ## Tech Stack
 
