@@ -1,0 +1,235 @@
+---
+description: React frontend rules for the Tauri S3 drive app
+globs: src/**/*.{ts,tsx,css}
+alwaysApply: true
+---
+
+# Frontend Rules
+
+## Stack
+- React 19 + TypeScript (strict mode)
+- Vite as bundler
+- TailwindCSS for styling
+- Zustand for global state
+- React Query (TanStack) for async/Tauri command data fetching
+- React Router for navigation
+
+---
+
+## Folder Structure
+
+```
+src/
+├── main.tsx                        # App entry
+├── App.tsx                         # Root router + providers
+├── assets/                         # Static assets (icons, images)
+├── styles/                         # Global CSS, Tailwind base
+├── lib/
+│   ├── tauri.ts                    # All invoke() calls live here — never call invoke() in a component
+│   ├── utils.ts                    # Pure utility functions (formatBytes, truncatePath, etc.)
+│   └── constants.ts                # App-wide constants
+├── store/
+│   └── bucketStore.ts              # Zustand stores (one file per domain)
+├── hooks/
+│   └── useBucketContents.ts        # Custom hooks wrapping React Query + tauri lib
+├── types/
+│   └── index.ts                    # All shared TypeScript types/interfaces
+├── components/
+│   └── ui/                         # Reusable primitives (Button, Modal, Spinner, etc.)
+├── dashboard/
+│   ├── Dashboard.tsx               # Route root for dashboard
+│   ├── components/
+│   │   ├── FileTable.tsx
+│   │   ├── BreadcrumbBar.tsx
+│   │   └── UploadDropzone.tsx
+│   └── utils/
+│       └── fileHelpers.ts          # Dashboard-specific utils only
+├── settings/
+│   ├── Settings.tsx                # Route root for settings
+│   ├── components/
+│   │   ├── BucketForm.tsx
+│   │   └── ConnectionStatus.tsx
+│   └── utils/
+│       └── validateCredentials.ts
+└── buckets/
+    ├── BucketList.tsx
+    ├── components/
+    │   └── BucketCard.tsx
+    └── utils/
+```
+
+Every feature/route gets its own folder at the top level.
+Components shared across features go in `src/components/ui/`.
+Never put business logic in a component — extract to a hook or util.
+
+---
+
+## Component Rules
+
+- Functional components only, no class components
+- One component per file, filename matches the component name exactly
+- Props interface defined directly above the component, named `[ComponentName]Props`
+- Default export for the main component, named exports for helpers in same file
+- No inline anonymous functions passed as event handlers — extract and name them
+
+```tsx
+// GOOD
+interface FileRowProps {
+  file: BucketFile;
+  onDelete: (key: string) => void;
+}
+
+export default function FileRow({ file, onDelete }: FileRowProps) {
+  const handleDelete = () => onDelete(file.key);
+  return <button onClick={handleDelete}>Delete</button>;
+}
+
+// BAD — no inline handlers, no unnamed props
+export default function FileRow({ file, onDelete }: { file: any; onDelete: any }) {
+  return <button onClick={() => onDelete(file.key)}>Delete</button>;
+}
+```
+
+---
+
+## Tauri IPC
+
+All `invoke()` calls are centralized in `src/lib/tauri.ts`. Components never import from `@tauri-apps/api` directly.
+
+```ts
+// src/lib/tauri.ts
+import { invoke } from "@tauri-apps/api/core";
+import { BucketFile, BucketCredentials } from "../types";
+
+export async function listBucketFiles(prefix: string): Promise<BucketFile[]> {
+  return invoke("list_files", { prefix });
+}
+
+export async function deleteFile(key: string): Promise<void> {
+  return invoke("delete_file", { key });
+}
+```
+
+Wrap tauri calls in React Query hooks inside `src/hooks/`:
+
+```ts
+// src/hooks/useBucketContents.ts
+import { useQuery } from "@tanstack/react-query";
+import { listBucketFiles } from "../lib/tauri";
+
+export function useBucketContents(prefix: string) {
+  return useQuery({
+    queryKey: ["bucket", prefix],
+    queryFn: () => listBucketFiles(prefix),
+    staleTime: 30_000,
+  });
+}
+```
+
+---
+
+## State Management
+
+- Zustand for persistent/cross-route state (active bucket, credentials, UI preferences)
+- React Query for server/async state (file lists, bucket metadata)
+- Local `useState` for ephemeral component state (modal open, hover, input values)
+- Never store derived data in Zustand — derive it in the component or hook
+
+```ts
+// src/store/bucketStore.ts
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { BucketConnection } from "../types";
+
+interface BucketStore {
+  connections: BucketConnection[];
+  activeConnectionId: string | null;
+  addConnection: (conn: BucketConnection) => void;
+  setActive: (id: string) => void;
+}
+
+export const useBucketStore = create<BucketStore>()(
+  persist(
+    (set) => ({
+      connections: [],
+      activeConnectionId: null,
+      addConnection: (conn) =>
+        set((s) => ({ connections: [...s.connections, conn] })),
+      setActive: (id) => set({ activeConnectionId: id }),
+    }),
+    { name: "bucket-store" }
+  )
+);
+```
+
+---
+
+## TypeScript
+
+- `strict: true` in tsconfig — no exceptions
+- No `any` — use `unknown` and narrow it
+- All Tauri command return types must have a corresponding TS type in `src/types/index.ts`
+- Prefer `interface` for object shapes, `type` for unions/aliases
+
+```ts
+// src/types/index.ts
+export interface BucketFile {
+  key: string;
+  size: number;
+  lastModified: string;
+  etag: string;
+}
+
+export interface BucketConnection {
+  id: string;
+  label: string;
+  provider: "r2" | "minio" | "s3" | "b2" | "wasabi";
+  endpoint: string;
+  bucket: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+```
+
+---
+
+## Styling
+
+- Tailwind utility classes only — no inline `style={}` unless dealing with dynamic values that Tailwind can't handle (e.g. dynamic widths from JS)
+- Component variants use `clsx` or `cva` — not ternary class strings
+- No CSS modules, no styled-components
+- Design tokens live in `tailwind.config.ts` — never hardcode hex values in JSX
+
+```tsx
+// GOOD
+import { clsx } from "clsx";
+
+const buttonClass = clsx(
+  "px-4 py-2 rounded-md text-sm font-medium",
+  variant === "danger" && "bg-red-500 text-white hover:bg-red-600",
+  variant === "ghost" && "bg-transparent text-zinc-400 hover:text-white"
+);
+
+// BAD
+<button style={{ color: "#ef4444" }} className={"px-4 " + (danger ? "bg-red-500" : "bg-zinc-800")}>
+```
+
+---
+
+## Error Handling
+
+- All async operations wrapped in try/catch with typed errors
+- Use a shared `handleTauriError(e: unknown): string` util in `src/lib/utils.ts`
+- Surface errors via toast notifications (one toast lib, configured in `App.tsx`)
+- Never `console.error` raw objects in production paths — log the message
+
+---
+
+## Do Not
+
+- Do not call `invoke()` outside `src/lib/tauri.ts`
+- Do not create a new util function if one already exists — search `src/lib/utils.ts` first
+- Do not duplicate types — if it exists in `src/types/index.ts`, import it
+- Do not nest components inside other component files
+- Do not use `useEffect` for data fetching — use React Query
+- Do not let any file exceed 300 lines — extract to a smaller component or hook

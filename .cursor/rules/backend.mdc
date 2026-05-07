@@ -1,0 +1,312 @@
+---
+description: Rust backend rules for the Tauri S3 drive app
+globs: src-tauri/src/**/*.rs
+alwaysApply: true
+---
+
+# Backend Rules (Rust / Tauri)
+
+## Stack
+- Tauri v2
+- `aws-sdk-s3` for S3-compatible operations (R2, MinIO, Wasabi, B2)
+- `tokio` for async runtime
+- `serde` / `serde_json` for serialization
+- `thiserror` for typed errors
+- `keyring` for secure credential storage
+
+---
+
+## Project Structure
+
+```
+src-tauri/src/
+├── main.rs          # Entry point — calls lib::run(), do not modify
+├── lib.rs           # App setup: .invoke_handler(), plugin registration, state setup
+├── commands/
+│   ├── mod.rs       # Re-exports all command modules
+│   ├── bucket.rs    # list_files, delete_file, create_folder, get_presigned_url
+│   ├── upload.rs    # upload_file, upload_stream, multipart handling
+│   ├── download.rs  # download_file, stream_to_disk
+│   └── connection.rs # add_connection, test_connection, list_connections, remove_connection
+├── s3/
+│   ├── mod.rs       # Re-exports
+│   ├── client.rs    # S3 client builder — resolves credentials and endpoint by provider
+│   ├── operations.rs# Raw S3 ops (list, put, delete, presign) — no Tauri types here
+│   └── types.rs     # S3-specific types (BucketFile, UploadProgress, etc.)
+├── storage/
+│   ├── mod.rs
+│   ├── credentials.rs # keyring read/write for access keys
+│   └── connections.rs # persist connection configs (sans secrets) to app data dir
+├── error.rs         # AppError enum + impl Into<String> for Tauri command returns
+└── state.rs         # Tauri managed state (S3ClientCache, ActiveConnection, etc.)
+```
+
+### Rules
+- No file over 500 lines — split into a submodule and re-export
+- No business logic in `lib.rs` or `main.rs`
+- Commands in `commands/` are thin: validate input → call `s3/` or `storage/` → map error → return
+- Raw S3 API calls live in `s3/operations.rs` only — nothing else touches the SDK directly
+
+---
+
+## Credential storage rules
+
+- Secret access keys are ONLY stored via `storage::credentials` (keyring crate).
+- `ConnectionConfig` MUST NOT contain `secret_access_key` — ever.
+- App data dir JSON contains config only — safe to read in logs/debug.
+- Keyring failures map to `AppError::Keyring` — never silently swallow them.
+- R2 endpoint normalization happens in `s3/client.rs` `normalize_r2_endpoint()` — nowhere else.
+- Connection test MUST succeed before any credentials are persisted.
+
+---
+
+## Command Structure
+
+Commands are the only Tauri-exposed layer. They must:
+1. Accept only serializable types
+2. Return `Result<T, String>` where the error is from `AppError`
+3. Delegate immediately to a service function — no logic inside the command fn itself
+
+```rust
+// commands/bucket.rs
+use tauri::State;
+use crate::state::AppState;
+use crate::s3::operations;
+use crate::s3::types::BucketFile;
+use crate::error::AppError;
+
+#[tauri::command]
+pub async fn list_files(
+    prefix: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<BucketFile>, String> {
+    let client = state.client().await.map_err(AppError::into_string)?;
+    operations::list_objects(&client, &state.active_bucket(), &prefix)
+        .await
+        .map_err(AppError::into_string)
+}
+
+#[tauri::command]
+pub async fn delete_file(
+    key: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let client = state.client().await.map_err(AppError::into_string)?;
+    operations::delete_object(&client, &state.active_bucket(), &key)
+        .await
+        .map_err(AppError::into_string)
+}
+```
+
+Register all commands in `lib.rs`:
+
+```rust
+// lib.rs
+mod commands;
+mod s3;
+mod storage;
+mod error;
+mod state;
+
+use commands::{bucket, upload, download, connection};
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .manage(state::AppState::default())
+        .invoke_handler(tauri::generate_handler![
+            bucket::list_files,
+            bucket::delete_file,
+            bucket::create_folder,
+            upload::upload_file,
+            download::download_file,
+            connection::add_connection,
+            connection::test_connection,
+            connection::list_connections,
+            connection::remove_connection,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error running tauri app");
+}
+```
+
+---
+
+## Error Handling
+
+Single error type for the whole app. `thiserror` for clean `Display` impls.
+
+```rust
+// error.rs
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum AppError {
+    #[error("S3 error: {0}")]
+    S3(String),
+
+    #[error("Connection not found: {id}")]
+    ConnectionNotFound { id: String },
+
+    #[error("Invalid credentials")]
+    InvalidCredentials,
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Serialization error: {0}")]
+    Serde(#[from] serde_json::Error),
+
+    #[error("Keyring error: {0}")]
+    Keyring(String),
+}
+
+impl AppError {
+    pub fn into_string(self) -> String {
+        self.to_string()
+    }
+}
+```
+
+- Never `unwrap()` or `expect()` in command or service code — always propagate with `?`
+- `expect()` is allowed only in `main.rs` / `lib.rs` startup where a panic is intentional
+- Never return raw SDK error strings to the frontend — map them to `AppError` variants first
+
+---
+
+## S3 Client
+
+The client builder handles endpoint resolution per provider. No command or operation should ever construct an `aws_sdk_s3::Client` directly.
+
+```rust
+// s3/client.rs
+use aws_config::{BehaviorVersion, Region};
+use aws_sdk_s3::{Client, Config};
+use aws_credential_types::Credentials;
+use crate::storage::connections::ConnectionConfig;
+use crate::error::AppError;
+
+pub async fn build_client(conn: &ConnectionConfig, secret: &str) -> Result<Client, AppError> {
+    let creds = Credentials::new(
+        &conn.access_key_id,
+        secret,
+        None,
+        None,
+        "s3-drive",
+    );
+
+    let config = Config::builder()
+        .behavior_version(BehaviorVersion::latest())
+        .credentials_provider(creds)
+        .endpoint_url(endpoint_for_provider(&conn.provider, &conn.endpoint))
+        .region(Region::new(conn.region.clone().unwrap_or_else(|| "auto".into())))
+        .force_path_style(conn.provider == "minio")
+        .build();
+
+    Ok(Client::from_conf(config))
+}
+
+fn endpoint_for_provider(provider: &str, custom_endpoint: &str) -> String {
+    match provider {
+        "r2" => format!("https://{}", custom_endpoint),
+        "minio" => custom_endpoint.to_owned(),
+        "s3" => "https://s3.amazonaws.com".to_owned(),
+        "b2" => "https://s3.us-west-004.backblazeb2.com".to_owned(),
+        _ => custom_endpoint.to_owned(),
+    }
+}
+```
+
+---
+
+## State
+
+```rust
+// state.rs
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use aws_sdk_s3::Client;
+use crate::storage::connections::ConnectionConfig;
+use crate::error::AppError;
+
+#[derive(Default)]
+pub struct AppState {
+    inner: Arc<RwLock<Option<ActiveSession>>>,
+}
+
+struct ActiveSession {
+    client: Client,
+    bucket: String,
+}
+
+impl AppState {
+    pub async fn set_session(&self, client: Client, bucket: String) {
+        let mut lock = self.inner.write().await;
+        *lock = Some(ActiveSession { client, bucket });
+    }
+
+    pub async fn client(&self) -> Result<Client, AppError> {
+        let lock = self.inner.read().await;
+        lock.as_ref()
+            .map(|s| s.client.clone())
+            .ok_or(AppError::InvalidCredentials)
+    }
+
+    pub async fn active_bucket(&self) -> String {
+        let lock = self.inner.read().await;
+        lock.as_ref().map(|s| s.bucket.clone()).unwrap_or_default()
+    }
+}
+```
+
+---
+
+## Types
+
+Shared types used between layers live in `s3/types.rs`. Never use raw SDK types in command return values — always map to local types.
+
+```rust
+// s3/types.rs
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BucketFile {
+    pub key: String,
+    pub size: u64,
+    pub last_modified: String,
+    pub etag: String,
+    pub is_folder: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UploadProgress {
+    pub key: String,
+    pub bytes_sent: u64,
+    pub total_bytes: u64,
+}
+```
+
+---
+
+## Naming Conventions
+
+| Thing | Convention | Example |
+|---|---|---|
+| Files | `snake_case` | `bucket.rs`, `client.rs` |
+| Functions | `snake_case` | `list_objects`, `build_client` |
+| Types / Structs | `PascalCase` | `BucketFile`, `AppState` |
+| Tauri commands | `snake_case` (matches frontend invoke key) | `list_files`, `upload_file` |
+| Errors | `PascalCase` variant, descriptive | `ConnectionNotFound`, `InvalidCredentials` |
+| Constants | `SCREAMING_SNAKE_CASE` | `MAX_UPLOAD_CHUNK_SIZE` |
+
+---
+
+## Do Not
+
+- Do not write business logic in `main.rs` or `lib.rs`
+- Do not call AWS SDK methods outside `s3/operations.rs`
+- Do not `unwrap()` or `expect()` in commands or services
+- Do not duplicate a function — if it exists somewhere, import it
+- Do not let any file exceed 500 lines — split and re-export
+- Do not return raw error strings from SDK — always map to `AppError`
+- Do not store secrets in plain app config — use `keyring` via `storage/credentials.rs`
