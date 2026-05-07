@@ -117,11 +117,16 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const tag = context.ref.replace('refs/tags/', '');
-            const { data: release } = await github.rest.repos.getReleaseByTag({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag,
-            });
+            // Drafts aren't returned by getReleaseByTag, so paginate through
+            // all releases (including drafts) and find ours by tag_name.
+            const releases = await github.paginate(
+              github.rest.repos.listReleases,
+              { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 },
+            );
+            const release = releases.find((r) => r.tag_name === tag);
+            if (release == null) {
+              throw new Error(`No release found with tag_name ${tag}`);
+            }
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,

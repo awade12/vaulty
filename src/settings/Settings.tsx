@@ -1,3 +1,5 @@
+import { isTauri } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -36,6 +38,12 @@ export default function Settings() {
   const [discoverOpen, setDiscoverOpen] = useState(false);
   const [discoverCreds, setDiscoverCreds] =
     useState<ListBucketsCredentials | null>(null);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    void getVersion().then(setAppVersion);
+  }, []);
 
   const editingDraft = useMemo(
     () => connections.find((c) => c.id === editingId) ?? null,
@@ -222,8 +230,13 @@ export default function Settings() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-white">
-      <header className="flex h-12 items-center border-b border-[0.5px] border-zinc-200 bg-zinc-50 px-6">
+      <header className="flex h-12 items-center justify-between border-b border-[0.5px] border-zinc-200 bg-zinc-50 px-6">
         <h1 className="text-sm font-medium text-zinc-900">Settings</h1>
+        {appVersion != null && (
+          <span className="rounded-full bg-white px-2 py-0.5 font-mono text-[11px] text-zinc-500 ring-1 ring-inset ring-zinc-200">
+            v{appVersion}
+          </span>
+        )}
       </header>
       <div className="flex min-h-0 flex-1 gap-8 overflow-auto p-6">
         <div className="min-w-0 flex-1">
