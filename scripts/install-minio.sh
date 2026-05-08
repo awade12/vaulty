@@ -23,10 +23,22 @@ CONTAINER_NAME="vaulty-minio"
 IMAGE="quay.io/minio/minio"
 
 # ── Docker check / install ────────────────────────────────────────────────────
+
+# Use sudo for docker if the current user can't access the socket directly
+DOCKER="docker"
+_docker() { $DOCKER "$@"; }
+
 ensure_docker() {
-  if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
-    info "Docker $(docker --version | awk '{print $3}' | tr -d ',') is ready."
-    return
+  # Check if docker daemon is reachable (try with and without sudo)
+  if command -v docker &>/dev/null; then
+    if docker info &>/dev/null 2>&1; then
+      info "Docker $(docker --version | awk '{print $3}' | tr -d ',') is ready."
+      return
+    elif sudo docker info &>/dev/null 2>&1; then
+      info "Docker $(docker --version | awk '{print $3}' | tr -d ',') is ready (running with sudo)."
+      DOCKER="sudo docker"
+      return
+    fi
   fi
 
   warn "Docker not found — installing now..."
@@ -48,7 +60,7 @@ ensure_docker() {
         sudo apt-get install -y ca-certificates curl gnupg lsb-release
         sudo install -m 0755 -d /etc/apt/keyrings
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-          | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          | sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
         echo \
           "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
           https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
@@ -57,7 +69,7 @@ ensure_docker() {
         sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
         sudo systemctl enable --now docker
         sudo usermod -aG docker "$USER"
-        info "Docker installed. You may need to log out and back in for group membership to take effect."
+        info "Docker installed."
       elif command -v yum &>/dev/null; then
         sudo yum install -y yum-utils
         sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
@@ -74,8 +86,11 @@ ensure_docker() {
       ;;
   esac
 
-  if ! docker info &>/dev/null 2>&1; then
-    error "Docker was installed but the daemon isn't running. Start Docker and re-run this script."
+  # After install, daemon should be up — fall back to sudo if group not active yet
+  if sudo docker info &>/dev/null 2>&1; then
+    DOCKER="sudo docker"
+  else
+    error "Docker daemon isn't running after install. Try: sudo systemctl start docker"
   fi
 }
 
@@ -103,16 +118,16 @@ main() {
   info "Data directory: $DATA_DIR"
 
   # Remove stale container if it exists
-  if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+  if _docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
     warn "Removing existing container '$CONTAINER_NAME'..."
-    docker rm -f "$CONTAINER_NAME" >/dev/null
+    _docker rm -f "$CONTAINER_NAME" >/dev/null
   fi
 
   info "Pulling MinIO image..."
-  docker pull "$IMAGE" --quiet
+  _docker pull "$IMAGE" --quiet
 
   info "Starting MinIO container..."
-  docker run -d \
+  _docker run -d \
     --name "$CONTAINER_NAME" \
     --restart unless-stopped \
     -p "${MINIO_API_PORT}:9000" \
