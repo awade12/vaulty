@@ -186,11 +186,14 @@ export default function MinIOGuide() {
   const [bucketName, setBucketName] = useState("");
 
   const endpoint = `http://${minioHost}:${minioPort}`;
+  // The connection form expects host:port without protocol for MinIO
+  const endpointForForm = `${minioHost}:${minioPort}`;
 
   function handleConnectInVaulty() {
     const params = new URLSearchParams({
       prefill: "minio",
-      endpoint,
+      presetId: "minio",
+      endpoint: endpointForForm,
       accessKeyId: accessKey,
       secretAccessKey: secretKey,
       bucket: bucketName,

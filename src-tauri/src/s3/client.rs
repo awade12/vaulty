@@ -18,7 +18,14 @@ pub fn normalize_r2_endpoint(raw: &str) -> String {
 fn resolved_endpoint(provider: &str, endpoint: &str) -> String {
     match provider {
         "r2" => normalize_r2_endpoint(endpoint),
-        "minio" => endpoint.trim().trim_end_matches('/').to_owned(),
+        "minio" => {
+            let e = endpoint.trim().trim_end_matches('/');
+            if e.starts_with("http://") || e.starts_with("https://") {
+                e.to_owned()
+            } else {
+                format!("http://{e}")
+            }
+        }
         "s3" => {
             let e = endpoint.trim();
             if e.is_empty() {

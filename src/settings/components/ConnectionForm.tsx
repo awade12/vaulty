@@ -43,6 +43,7 @@ export interface ConnectionFormPrefill {
   accessKeyId?: string;
   secretAccessKey?: string;
   label?: string;
+  presetId?: string;
 }
 
 interface ConnectionFormProps {
@@ -72,6 +73,7 @@ export default function ConnectionForm({
   // endpoint; otherwise detect from prefill endpoint or default to R2.
   const initialPreset =
     (draft != null ? detectPreset(draft.endpoint) : null) ??
+    (prefill?.presetId != null ? (PROVIDER_PRESETS.find((p) => p.id === prefill.presetId) ?? null) : null) ??
     (prefill?.endpoint != null ? detectPreset(prefill.endpoint) : null) ??
     PROVIDER_PRESETS[0]!;
   const [presetId, setPresetId] = useState<string>(initialPreset.id);

@@ -47,6 +47,7 @@ export default function Settings() {
     if (searchParams.get("prefill") !== "minio") return null;
     return {
       label: searchParams.get("label") ?? "My MinIO",
+      presetId: searchParams.get("presetId") ?? "minio",
       endpoint: searchParams.get("endpoint") ?? "",
       bucket: searchParams.get("bucket") ?? "",
       accessKeyId: searchParams.get("accessKeyId") ?? "",
