@@ -8,6 +8,7 @@ import QuickUploadModal from "./components/QuickUploadModal";
 import Dashboard from "./dashboard/Dashboard";
 import { useDesktopQuickActions } from "./hooks/useDesktopQuickActions";
 import { useStartupUpdateCheck } from "./hooks/useStartupUpdateCheck";
+import MinIOGuide from "./minio/MinIOGuide";
 import Settings from "./settings/Settings";
 
 function CheckCircleIcon({ className }: { className?: string }) {
@@ -60,6 +61,7 @@ export default function App() {
           <Route element={<AppShell />}>
             <Route element={<Dashboard />} index />
             <Route element={<Settings />} path="settings" />
+            <Route element={<MinIOGuide />} path="minio" />
             <Route element={<Navigate replace to="/" />} path="*" />
           </Route>
         </Routes>

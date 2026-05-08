@@ -37,12 +37,21 @@ export interface ConnectionFormValues {
   secretAccessKey: string;
 }
 
+export interface ConnectionFormPrefill {
+  endpoint?: string;
+  bucket?: string;
+  accessKeyId?: string;
+  secretAccessKey?: string;
+  label?: string;
+}
+
 interface ConnectionFormProps {
   isPending: boolean;
   onSubmit: (values: ConnectionFormValues) => void;
   draft?: ConnectionConfig | null;
   onCancelDraft?: () => void;
   onDiscoverRequest?: (credentials: ListBucketsCredentials) => void;
+  prefill?: ConnectionFormPrefill | null;
 }
 
 const inputClass =
@@ -54,14 +63,16 @@ export default function ConnectionForm({
   draft,
   onCancelDraft,
   onDiscoverRequest,
+  prefill,
 }: ConnectionFormProps) {
   const isEdit = draft != null;
   const formRef = useRef<HTMLFormElement>(null);
 
   // Pick a sensible default preset: when editing, detect from existing
-  // endpoint; otherwise default to R2 (most common case for this app).
+  // endpoint; otherwise detect from prefill endpoint or default to R2.
   const initialPreset =
     (draft != null ? detectPreset(draft.endpoint) : null) ??
+    (prefill?.endpoint != null ? detectPreset(prefill.endpoint) : null) ??
     PROVIDER_PRESETS[0]!;
   const [presetId, setPresetId] = useState<string>(initialPreset.id);
   const preset =
@@ -73,9 +84,11 @@ export default function ConnectionForm({
   >({});
   // Endpoint shown in the input — synthesized from preset + values, or
   // overridden when the user types into it directly.
-  const [endpoint, setEndpoint] = useState<string>(draft?.endpoint ?? "");
+  const [endpoint, setEndpoint] = useState<string>(
+    draft?.endpoint ?? prefill?.endpoint ?? "",
+  );
   const [endpointTouched, setEndpointTouched] = useState<boolean>(
-    draft != null,
+    draft != null || prefill?.endpoint != null,
   );
   const [region, setRegion] = useState<string>(
     draft?.region ?? preset.defaultRegion,
@@ -179,7 +192,7 @@ export default function ConnectionForm({
         </label>
         <input
           className={inputClass}
-          defaultValue={draft?.label ?? ""}
+          defaultValue={draft?.label ?? prefill?.label ?? ""}
           name="label"
           placeholder="Connection name"
           type="text"
@@ -249,7 +262,7 @@ export default function ConnectionForm({
         <div className="flex gap-2">
           <input
             className={inputClass}
-            defaultValue={draft?.bucket ?? ""}
+            defaultValue={draft?.bucket ?? prefill?.bucket ?? ""}
             name="bucket"
             placeholder="Bucket name"
             type="text"
@@ -272,13 +285,14 @@ export default function ConnectionForm({
         <input
           autoComplete="off"
           className={inputClass}
-          defaultValue={draft?.accessKeyId ?? ""}
+          defaultValue={draft?.accessKeyId ?? prefill?.accessKeyId ?? ""}
           name="accessKeyId"
           placeholder="Access key ID"
           type="text"
         />
         <input
           className={inputClass}
+          defaultValue={prefill?.secretAccessKey ?? ""}
           name="secretAccessKey"
           placeholder={
             isEdit ? "New secret (optional)" : "Secret access key"

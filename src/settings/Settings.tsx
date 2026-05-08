@@ -2,6 +2,7 @@ import { isTauri } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { useConnectionsQuery } from "../hooks/useConnectionsQuery";
@@ -17,6 +18,7 @@ import { handleTauriError } from "../lib/utils";
 import { useBucketStore } from "../store/bucketStore";
 import type { ListBucketsCredentials } from "../types";
 import ConnectionForm, {
+  type ConnectionFormPrefill,
   type ConnectionFormValues,
 } from "./components/ConnectionForm";
 import ConnectionListItem from "./components/ConnectionListItem";
@@ -39,6 +41,18 @@ export default function Settings() {
   const [discoverCreds, setDiscoverCreds] =
     useState<ListBucketsCredentials | null>(null);
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const prefill = useMemo<ConnectionFormPrefill | null>(() => {
+    if (searchParams.get("prefill") !== "minio") return null;
+    return {
+      label: searchParams.get("label") ?? "My MinIO",
+      endpoint: searchParams.get("endpoint") ?? "",
+      bucket: searchParams.get("bucket") ?? "",
+      accessKeyId: searchParams.get("accessKeyId") ?? "",
+      secretAccessKey: searchParams.get("secretAccessKey") ?? "",
+    };
+  }, [searchParams]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -181,6 +195,7 @@ export default function Settings() {
       return;
     }
     addMutation.mutate(values);
+    if (searchParams.get("prefill")) setSearchParams({});
   }
 
   function handleCancelEdit(): void {
@@ -301,6 +316,7 @@ export default function Settings() {
               editingDraft == null ? handleDiscoverRequest : undefined
             }
             onSubmit={handleFormSubmit}
+            prefill={editingDraft == null ? prefill : null}
           />
         </div>
       </div>

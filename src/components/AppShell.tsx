@@ -87,6 +87,14 @@ function DatabaseIcon({ className }: { className?: string }) {
   );
 }
 
+function MinIOIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3m-13.5 0V9a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 9v5.25m-4.5-8.625L12 3l-3.75 2.625" />
+    </svg>
+  );
+}
+
 function ChevronDownIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -201,6 +209,21 @@ export default function AppShell() {
               )}
             </div>
             
+            <NavLink
+              className={({ isActive }) => clsx(
+                "flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs transition-colors",
+                isActive
+                  ? "bg-white text-zinc-900 font-medium"
+                  : "text-zinc-500 hover:bg-white hover:text-zinc-700"
+              )}
+              to="/minio"
+            >
+              <div className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-100">
+                <MinIOIcon className="h-4 w-4 text-zinc-400" />
+              </div>
+              MinIO Guide
+            </NavLink>
+
             <NavLink
               className={({ isActive }) => clsx(
                 "flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs transition-colors",
