@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { useState, useRef, useEffect, type ChangeEvent, type KeyboardEvent } from "react";
 
 import { clsx } from "clsx";
 
@@ -7,11 +7,18 @@ import { basenameKey, formatBytes, joinPrefix } from "../lib/utils";
 import { useBucketStore } from "../store/bucketStore";
 import type { BucketFile } from "../types";
 import ConfirmDeleteModal from "./components/ConfirmDeleteModal";
+import CleanupPanel from "./components/CleanupPanel";
+import ConflictModal from "./components/ConflictModal";
+import CrossBucketTransferModal from "./components/CrossBucketTransferModal";
 import DashboardDisconnected from "./components/DashboardDisconnected";
 import FileGrid from "./components/FileGrid";
+import FolderSyncPanel from "./components/FolderSyncPanel";
 import NewFolderModal from "./components/NewFolderModal";
+import ObjectDetailsPanel from "./components/ObjectDetailsPanel";
 import RenameModal from "./components/RenameModal";
+import ShareLinkModal from "./components/ShareLinkModal";
 import TransferDock from "./components/TransferDock";
+import UsageSummaryPanel from "./components/UsageSummaryPanel";
 import VersionHistoryModal from "./components/VersionHistoryModal";
 
 function SearchIcon({ className }: { className?: string }) {
@@ -50,6 +57,30 @@ function FolderUploadIcon({ className }: { className?: string }) {
   );
 }
 
+function SyncIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M20.015 4.356v4.992m0 0h-4.992m4.992 0-3.181-3.183a8.25 8.25 0 0 0-13.803 3.7" />
+    </svg>
+  );
+}
+
+function CleanupIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+    </svg>
+  );
+}
+
+function PinIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75 7.5 16.5m0 0v-5.25m0 5.25h5.25M6.75 6.75h10.5v10.5" />
+    </svg>
+  );
+}
+
 function GridIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
@@ -62,6 +93,14 @@ function ListIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+    </svg>
+  );
+}
+
+function EllipsisIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
     </svg>
   );
 }
@@ -142,7 +181,26 @@ export default function Dashboard() {
   const d = useDashboardController();
   const viewMode = useBucketStore((s) => s.viewMode);
   const setViewMode = useBucketStore((s) => s.setViewMode);
+  const pinnedPrefixes = useBucketStore((s) => s.pinnedPrefixes);
+  const togglePinnedPrefix = useBucketStore((s) => s.togglePinnedPrefix);
   const [versionFile, setVersionFile] = useState<BucketFile | null>(null);
+  const [detailsFile, setDetailsFile] = useState<BucketFile | null>(null);
+  const [sidePanel, setSidePanel] = useState<"details" | "cleanup" | "sync" | "usage" | null>(null);
+  const [transferKeys, setTransferKeys] = useState<string[] | null>(null);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setMoreMenuOpen(false);
+      }
+    }
+    if (moreMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [moreMenuOpen]);
 
   function handleSearchChange(e: ChangeEvent<HTMLInputElement>) {
     d.handleFilterChange(e);
@@ -162,6 +220,35 @@ export default function Dashboard() {
     setVersionFile(file);
   }
 
+  function handleShowDetails(file: BucketFile) {
+    setDetailsFile(file);
+    setSidePanel("details");
+  }
+
+  function handleShowCleanup() {
+    setSidePanel("cleanup");
+  }
+
+  function handleShowSync() {
+    setSidePanel("sync");
+  }
+
+  function handleShowUsage() {
+    setSidePanel("usage");
+  }
+
+  function handleCloseSidePanel() {
+    setSidePanel(null);
+  }
+
+  function handleTogglePin() {
+    if (d.active?.id == null) return;
+    togglePinnedPrefix(d.active.id, d.prefix);
+  }
+
+  const pinnedForActive = pinnedPrefixes.filter((p) => p.connectionId === d.active?.id);
+  const isCurrentPinned = pinnedForActive.some((p) => p.prefix === d.prefix);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-white">
       {!d.showBucket ? (
@@ -178,23 +265,14 @@ export default function Dashboard() {
               <div className="relative">
                 <SearchIcon className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                 <input
-                  className="w-56 rounded-lg border-0 bg-zinc-100 py-1.5 pl-9 pr-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-accent-200 transition-all"
+                  className="w-48 rounded-lg border-0 bg-zinc-100 py-1.5 pl-9 pr-3 text-xs text-zinc-900 placeholder:text-zinc-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-accent-200 transition-all"
                   onChange={handleSearchChange}
                   onKeyDown={handleSearchKeyDown}
-                  placeholder="Filter — Enter to search bucket"
+                  placeholder={d.searchBusy ? "Searching…" : "Search"}
                   type="search"
                   value={d.filter}
                 />
               </div>
-              <button
-                className="rounded-lg border border-[0.5px] border-zinc-200 bg-white px-2.5 py-1.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-800 disabled:opacity-40"
-                disabled={d.searchBusy || d.filter.trim().length < 2}
-                onClick={() => void d.runBucketSearch()}
-                title="Search the entire bucket recursively"
-                type="button"
-              >
-                {d.searchBusy ? "Searching…" : "Search bucket"}
-              </button>
               <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
                 <button
                   className={clsx(
@@ -220,26 +298,78 @@ export default function Dashboard() {
                 </button>
               </div>
               <button
-                className="flex items-center gap-1.5 rounded-lg border-0 bg-zinc-100 px-3 py-1.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-200 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-lg bg-zinc-100 px-2.5 py-1.5 text-xs text-zinc-600 transition-colors hover:bg-zinc-200 disabled:opacity-50"
                 disabled={d.isRowActionPending}
                 onClick={d.handleNewFolderClick}
+                title="New folder"
                 type="button"
               >
                 <FolderPlusIcon className="h-4 w-4" />
-                <span className="hidden sm:inline">New folder</span>
               </button>
+              <div className="relative" ref={moreMenuRef}>
+                <button
+                  className={clsx(
+                    "flex items-center gap-1 rounded-lg border-[0.5px] px-2.5 py-1.5 text-xs transition-colors disabled:opacity-50",
+                    moreMenuOpen
+                      ? "border-zinc-300 bg-zinc-100 text-zinc-700"
+                      : "border-zinc-200 bg-white text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600"
+                  )}
+                  disabled={d.isRowActionPending}
+                  onClick={() => setMoreMenuOpen((v) => !v)}
+                  type="button"
+                >
+                  <EllipsisIcon className="h-4 w-4" />
+                </button>
+                {moreMenuOpen && (
+                  <div className="absolute right-0 top-full z-20 mt-1 min-w-[160px] rounded-lg border-[0.5px] border-zinc-200 bg-white py-1 shadow-lg">
+                    <button
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-600 hover:bg-zinc-50"
+                      onClick={() => { handleTogglePin(); setMoreMenuOpen(false); }}
+                      type="button"
+                    >
+                      <PinIcon className="h-4 w-4 text-zinc-400" />
+                      {isCurrentPinned ? "Unpin folder" : "Pin folder"}
+                    </button>
+                    <button
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-600 hover:bg-zinc-50"
+                      onClick={() => { handleShowUsage(); setMoreMenuOpen(false); }}
+                      type="button"
+                    >
+                      <svg className="h-4 w-4 text-zinc-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" />
+                      </svg>
+                      Usage
+                    </button>
+                    <button
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-600 hover:bg-zinc-50"
+                      onClick={() => { handleShowCleanup(); setMoreMenuOpen(false); }}
+                      type="button"
+                    >
+                      <CleanupIcon className="h-4 w-4 text-zinc-400" />
+                      Cleanup
+                    </button>
+                    <button
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-600 hover:bg-zinc-50"
+                      onClick={() => { handleShowSync(); setMoreMenuOpen(false); }}
+                      type="button"
+                    >
+                      <SyncIcon className="h-4 w-4 text-zinc-400" />
+                      Folder sync
+                    </button>
+                    <div className="my-1 border-t border-[0.5px] border-zinc-100" />
+                    <button
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-600 hover:bg-zinc-50"
+                      onClick={() => { d.handleUploadFolderClick(); setMoreMenuOpen(false); }}
+                      type="button"
+                    >
+                      <FolderUploadIcon className="h-4 w-4 text-zinc-400" />
+                      Upload folder
+                    </button>
+                  </div>
+                )}
+              </div>
               <button
-                className="flex items-center gap-1.5 rounded-lg border border-[0.5px] border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-zinc-50 hover:text-zinc-600 disabled:opacity-50"
-                disabled={d.isRowActionPending}
-                onClick={d.handleUploadFolderClick}
-                title="Upload an entire folder"
-                type="button"
-              >
-                <FolderUploadIcon className="h-4 w-4" />
-                <span className="hidden md:inline">Upload folder</span>
-              </button>
-              <button
-                className="flex items-center gap-1.5 rounded-lg bg-accent-700 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-800 active:bg-accent-950 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-lg bg-accent-700 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-800 active:bg-accent-950 disabled:opacity-50"
                 disabled={d.isRowActionPending}
                 onClick={d.handleUploadClick}
                 type="button"
@@ -273,6 +403,23 @@ export default function Dashboard() {
               </button>
             </div>
           )}
+          {pinnedForActive.length > 0 && (
+            <div className="flex items-center gap-2 border-b border-[0.5px] border-zinc-200 bg-zinc-50 px-4 py-2">
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-300">
+                Pinned
+              </span>
+              {pinnedForActive.map((pin) => (
+                <button
+                  className="rounded-md border-[0.5px] border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
+                  key={pin.prefix || "root"}
+                  onClick={() => d.handleNavigate(pin.prefix)}
+                  type="button"
+                >
+                  {pin.prefix || "/"}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="flex min-h-0 flex-1 overflow-hidden">
             <FileGrid
@@ -285,9 +432,12 @@ export default function Dashboard() {
               onClearSelection={d.handleClearSelection}
               onCopyLink={d.handleCopyLink}
               onDeleteFile={d.handleDeleteRequest}
+              onDeleteSelected={d.handleDeleteSelected}
               onDownloadFile={d.handleDownloadFile}
+              onTransferSelected={setTransferKeys}
               onDuplicateFile={d.handleDuplicateFile}
               onMoveFile={d.handleMoveFile}
+              onShowDetails={handleShowDetails}
               onShowVersions={handleShowVersions}
               onZipDownload={d.handleZipDownload}
               onOpenFile={d.handleOpenFile}
@@ -299,6 +449,26 @@ export default function Dashboard() {
               prefix={d.prefix}
               selectedKeys={d.selectedKeys}
             />
+            {sidePanel === "details" && (
+              <ObjectDetailsPanel
+                connection={d.active}
+                file={detailsFile}
+                onClose={handleCloseSidePanel}
+              />
+            )}
+            {sidePanel === "cleanup" && (
+              <CleanupPanel onClose={handleCloseSidePanel} prefix={d.prefix} />
+            )}
+            {sidePanel === "sync" && (
+              <FolderSyncPanel
+                connection={d.active}
+                onClose={handleCloseSidePanel}
+                prefix={d.prefix}
+              />
+            )}
+            {sidePanel === "usage" && (
+              <UsageSummaryPanel onClose={handleCloseSidePanel} prefix={d.prefix} />
+            )}
           </div>
         </>
       )}
@@ -337,6 +507,37 @@ export default function Dashboard() {
         fileKey={versionFile?.key ?? ""}
         onClose={() => setVersionFile(null)}
         open={versionFile != null}
+      />
+      <ShareLinkModal file={d.shareTarget} onClose={d.handleShareModalClose} />
+      <ConflictModal
+        conflict={d.uploadConflict}
+        onResolve={d.handleUploadConflictResolve}
+      />
+      <CrossBucketTransferModal
+        activeConnectionId={d.active?.id ?? null}
+        connections={d.connections}
+        keys={transferKeys ?? []}
+        onClose={() => setTransferKeys(null)}
+        onDone={() => {
+          d.handleClearSelection();
+          void d.query.refetch();
+        }}
+      />
+      <ConflictModal
+        conflict={
+          d.moveConflict == null
+            ? null
+            : {
+                key: d.moveConflict.toKey,
+                item: {
+                  localPath: d.moveConflict.fromKey,
+                  objectRelativeKey: basenameKey(d.moveConflict.fromKey),
+                  size: 0,
+                  modifiedMillis: 0,
+                },
+              }
+        }
+        onResolve={d.handleMoveConflictResolve}
       />
 
       <footer className="flex h-7 shrink-0 items-center gap-2.5 border-t border-[0.5px] border-zinc-200 bg-zinc-50 px-4 text-[11px] text-zinc-400">

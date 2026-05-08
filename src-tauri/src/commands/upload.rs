@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use serde::Serialize;
 use tauri::State;
@@ -13,6 +14,8 @@ use crate::state::AppState;
 pub struct LocalUploadItem {
     pub local_path: String,
     pub object_relative_key: String,
+    pub size: u64,
+    pub modified_millis: u128,
 }
 
 fn normalize_rel_key(rel: &Path) -> Option<String> {
@@ -45,6 +48,18 @@ fn root_segment_for_dir(dir: &Path) -> String {
     }
 }
 
+fn file_fingerprint(path: &Path) -> Result<(u64, u128), AppError> {
+    let meta = std::fs::metadata(path)?;
+    let size = meta.len();
+    let modified_millis = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    Ok((size, modified_millis))
+}
+
 fn push_single_file(out: &mut Vec<LocalUploadItem>, path: &Path) -> Result<(), AppError> {
     let local_path = path
         .to_str()
@@ -53,9 +68,12 @@ fn push_single_file(out: &mut Vec<LocalUploadItem>, path: &Path) -> Result<(), A
         .file_name()
         .ok_or_else(|| AppError::Path("missing file name".into()))?;
     let object_relative_key = name.to_string_lossy().replace('\\', "/");
+    let (size, modified_millis) = file_fingerprint(path)?;
     out.push(LocalUploadItem {
         local_path: local_path.to_string(),
         object_relative_key,
+        size,
+        modified_millis,
     });
     Ok(())
 }
@@ -66,8 +84,7 @@ pub fn collect_upload_candidates(paths: Vec<String>) -> Result<Vec<LocalUploadIt
 
     for p in paths {
         let path = PathBuf::from(&p);
-        let meta =
-            std::fs::metadata(&path).map_err(|e| AppError::Io(e).into_string())?;
+        let meta = std::fs::metadata(&path).map_err(|e| AppError::Io(e).into_string())?;
         if meta.is_file() {
             push_single_file(&mut out, &path).map_err(AppError::into_string)?;
             continue;
@@ -91,12 +108,15 @@ pub fn collect_upload_candidates(paths: Vec<String>) -> Result<Vec<LocalUploadIt
                     continue;
                 };
                 let object_relative_key = format!("{root_seg}/{rel_key}");
-                let local_path = fp.to_str().ok_or_else(|| {
-                    AppError::Path("invalid path encoding".into()).into_string()
-                })?;
+                let local_path = fp
+                    .to_str()
+                    .ok_or_else(|| AppError::Path("invalid path encoding".into()).into_string())?;
+                let (size, modified_millis) = file_fingerprint(fp).map_err(|e| e.into_string())?;
                 out.push(LocalUploadItem {
                     local_path: local_path.to_string(),
                     object_relative_key,
+                    size,
+                    modified_millis,
                 });
             }
             continue;
@@ -143,4 +163,15 @@ pub async fn upload_file(
     operations::put_object_from_file(&client, &bucket, &key, path, &app)
         .await
         .map_err(AppError::into_string)
+}
+
+#[tauri::command]
+pub async fn delete_local_file(local_path: String) -> Result<(), String> {
+    let path = Path::new(&local_path);
+    if !path.is_file() {
+        return Ok(());
+    }
+    tokio::fs::remove_file(path)
+        .await
+        .map_err(|e| AppError::Io(e).into_string())
 }

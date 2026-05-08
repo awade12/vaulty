@@ -1,6 +1,6 @@
 import { join } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { toast } from "sonner";
 
 import {
@@ -18,7 +18,8 @@ import {
   resolveFileDownloadPath,
   resolveZipSavePath,
 } from "../lib/downloadDestination";
-import { downloadAsZip, getPresignedUrl } from "../lib/tauri";
+import { downloadAsZip, objectExists } from "../lib/tauri";
+import type { UploadConflict, UploadConflictResolution } from "../lib/uploadBatch";
 import { basenameKey, handleTauriError } from "../lib/utils";
 import { useUploadBatchStore } from "../store/uploadBatchStore";
 import type { BucketFile } from "../types";
@@ -40,6 +41,11 @@ export function useDashboardFileCommands({
 }: UseDashboardFileCommandsParams) {
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<BucketFile | null>(null);
+  const [shareTarget, setShareTarget] = useState<BucketFile | null>(null);
+  const [uploadConflict, setUploadConflict] = useState<UploadConflict | null>(null);
+  const [moveConflict, setMoveConflict] = useState<{ fromKey: string; toKey: string } | null>(null);
+  const uploadConflictResolver = useRef<((resolution: UploadConflictResolution) => void) | null>(null);
+  const moveConflictResolver = useRef<((resolution: UploadConflictResolution) => void) | null>(null);
 
   const del = useDashboardDeleteFlow({ prefix, selectedKeys, setSelectedKeys });
 
@@ -49,6 +55,28 @@ export function useDashboardFileCommands({
   const moveMut = useMoveObjectMutation();
   const openMut = useOpenObjectMutation();
   const duplicateMut = useDuplicateObjectMutation();
+
+  function resolveUploadConflict(conflict: UploadConflict): Promise<UploadConflictResolution> {
+    setUploadConflict(conflict);
+    return new Promise((resolve) => {
+      uploadConflictResolver.current = (resolution: UploadConflictResolution) => {
+        uploadConflictResolver.current = null;
+        setUploadConflict(null);
+        resolve(resolution);
+      };
+    });
+  }
+
+  function resolveMoveConflict(fromKey: string, toKey: string): Promise<UploadConflictResolution> {
+    setMoveConflict({ fromKey, toKey });
+    return new Promise((resolve) => {
+      moveConflictResolver.current = (resolution: UploadConflictResolution) => {
+        moveConflictResolver.current = null;
+        setMoveConflict(null);
+        resolve(resolution);
+      };
+    });
+  }
 
   const handlePathsDropped = useCallback(
     (paths: string[], targetFolderKey: string | null) => {
@@ -64,7 +92,7 @@ export function useDashboardFileCommands({
           ? targetFolderKey.replace(/\/+$/, "").split("/").pop() ?? "folder"
           : null;
       uploadMut.mutate(
-        { paths, targetPrefix: target },
+        { paths, targetPrefix: target, options: { onConflict: resolveUploadConflict } },
         {
           onError: (e) => {
             toast.error(handleTauriError(e));
@@ -97,7 +125,7 @@ export function useDashboardFileCommands({
       return;
     }
     const paths = Array.isArray(selected) ? selected : [selected];
-    uploadMut.mutate(paths, {
+    uploadMut.mutate({ paths, targetPrefix: prefix, options: { onConflict: resolveUploadConflict } }, {
       onError: (e) => {
         toast.error(handleTauriError(e));
       },
@@ -126,7 +154,7 @@ export function useDashboardFileCommands({
     if (folder == null) {
       return;
     }
-    uploadMut.mutate([folder], {
+    uploadMut.mutate({ paths: [folder], targetPrefix: prefix, options: { onConflict: resolveUploadConflict } }, {
       onError: (e) => {
         toast.error(handleTauriError(e));
       },
@@ -228,20 +256,44 @@ export function useDashboardFileCommands({
     );
   }
 
-  async function handleCopyLink(file: BucketFile): Promise<void> {
-    try {
-      const url = await getPresignedUrl(file.key);
-      await navigator.clipboard.writeText(url);
-      toast.success("Link copied");
-    } catch (e) {
-      toast.error(handleTauriError(e));
-    }
+  function handleCopyLink(file: BucketFile): void {
+    setShareTarget(file);
   }
 
-  function handleMoveFile(fromKey: string, toFolderKey: string): void {
+  function handleShareModalClose(): void {
+    setShareTarget(null);
+  }
+
+  async function nextAvailableKey(key: string): Promise<string> {
+    const slash = key.lastIndexOf("/");
+    const dot = key.lastIndexOf(".");
+    const base = dot > slash ? key.slice(0, dot) : key;
+    const ext = dot > slash ? key.slice(dot) : "";
+    for (let i = 1; i < 10_000; i++) {
+      const candidate = `${base} (${i})${ext}`;
+      if (!(await objectExists(candidate))) {
+        return candidate;
+      }
+    }
+    throw new Error("Could not find an available filename");
+  }
+
+  async function handleMoveFile(fromKey: string, toFolderKey: string): Promise<void> {
     const filename = basenameKey(fromKey);
     const targetFolder = toFolderKey.replace(/\/+$/, "");
-    const toKey = `${targetFolder}/${filename}`;
+    let toKey = `${targetFolder}/${filename}`;
+    try {
+      if (await objectExists(toKey)) {
+        const resolution = await resolveMoveConflict(fromKey, toKey);
+        if (resolution.choice === "skip") return;
+        if (resolution.choice === "keepBoth") {
+          toKey = await nextAvailableKey(toKey);
+        }
+      }
+    } catch (e) {
+      toast.error(handleTauriError(e));
+      return;
+    }
     moveMut.mutate(
       { fromKey, toKey },
       {
@@ -284,6 +336,20 @@ export function useDashboardFileCommands({
     del.handleBulkDeleteWithKeys(keys);
   }
 
+  function handleDeleteSelected(files: BucketFile[]): void {
+    if (files.length === 0) return;
+    if (files.length === 1 && files[0].isFolder) {
+      del.handleRecursiveRequestFolder(files[0]);
+      return;
+    }
+    const folders = files.filter((file) => file.isFolder);
+    if (folders.length > 0) {
+      toast.error("Delete selected folders one at a time.");
+      return;
+    }
+    del.handleBulkDeleteWithKeys(files.map((file) => file.key));
+  }
+
   function handleDuplicateFile(file: BucketFile): void {
     if (file.isFolder) return;
     duplicateMut.mutate(file.key, {
@@ -323,6 +389,9 @@ export function useDashboardFileCommands({
   return {
     folderModalOpen,
     renameTarget,
+    shareTarget,
+    uploadConflict,
+    moveConflict,
     pendingDelete: del.pendingDelete,
     uploadMut,
     createFolderMut,
@@ -349,10 +418,18 @@ export function useDashboardFileCommands({
     handleRenameModalClose,
     handleRenameSubmit,
     handleCopyLink,
+    handleShareModalClose,
     handleMoveFile,
     handleBulkDownload,
     handleBulkDelete,
+    handleDeleteSelected,
     handleDuplicateFile,
     handleZipDownload,
+    handleUploadConflictResolve: (resolution: UploadConflictResolution) => {
+      uploadConflictResolver.current?.(resolution);
+    },
+    handleMoveConflictResolve: (resolution: UploadConflictResolution) => {
+      moveConflictResolver.current?.(resolution);
+    },
   };
 }

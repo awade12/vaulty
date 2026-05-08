@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{Delete, ObjectIdentifier};
@@ -9,7 +11,10 @@ use tokio::io::AsyncWriteExt;
 
 use crate::error::AppError;
 use crate::s3::sdk_error::map_s3_sdk_error;
-use crate::s3::types::{BucketFile, FileVersion};
+use crate::s3::types::{
+    BucketFile, CleanupReport, DuplicateNameGroup, FileTypeUsage, FileVersion, ObjectDetails,
+    PrefixUsage, UsageSummary,
+};
 use crate::transfer_emit::TransferEmitter;
 
 pub async fn test_connection(client: &Client, bucket: &str) -> Result<(), AppError> {
@@ -122,12 +127,10 @@ pub async fn list_objects(
         }
     }
 
-    out.sort_by(|a, b| {
-        match (a.is_folder, b.is_folder) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.key.cmp(&b.key),
-        }
+    out.sort_by(|a, b| match (a.is_folder, b.is_folder) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.key.cmp(&b.key),
     });
 
     Ok(out)
@@ -215,6 +218,325 @@ pub async fn search_objects_recursive(
     Ok((matches, scanned, truncated))
 }
 
+pub async fn object_exists(client: &Client, bucket: &str, key: &str) -> Result<bool, AppError> {
+    let resp = client
+        .list_objects_v2()
+        .bucket(bucket)
+        .prefix(key.to_string())
+        .max_keys(1)
+        .send()
+        .await
+        .map_err(map_s3_sdk_error)?;
+    Ok(resp
+        .contents()
+        .iter()
+        .any(|obj| obj.key().unwrap_or_default() == key))
+}
+
+pub async fn object_details(
+    client: &Client,
+    bucket: &str,
+    key: &str,
+) -> Result<ObjectDetails, AppError> {
+    let head = client
+        .head_object()
+        .bucket(bucket)
+        .key(key)
+        .send()
+        .await
+        .map_err(map_s3_sdk_error)?;
+    let versioning = client
+        .get_bucket_versioning()
+        .bucket(bucket)
+        .send()
+        .await
+        .ok()
+        .and_then(|v| v.status().map(|s| s.as_str().to_string()))
+        .unwrap_or_else(|| "Unknown".to_string());
+    Ok(ObjectDetails {
+        key: key.to_string(),
+        size: head
+            .content_length()
+            .and_then(|n| u64::try_from(n).ok())
+            .unwrap_or(0),
+        last_modified: head
+            .last_modified()
+            .map(|t| t.to_string())
+            .unwrap_or_default(),
+        etag: head.e_tag().map(|s| s.to_string()).unwrap_or_default(),
+        content_type: head.content_type().unwrap_or("Unknown").to_string(),
+        storage_class: head
+            .storage_class()
+            .map(|s| s.as_str().to_string())
+            .unwrap_or_else(|| "STANDARD".to_string()),
+        cache_control: head.cache_control().unwrap_or("").to_string(),
+        metadata: head.metadata().cloned().unwrap_or_default(),
+        versioning_status: versioning,
+    })
+}
+
+fn object_from_listing(obj: &aws_sdk_s3::types::Object) -> BucketFile {
+    BucketFile {
+        key: obj.key().unwrap_or_default().to_string(),
+        size: obj.size().unwrap_or(0) as u64,
+        last_modified: obj
+            .last_modified()
+            .map(|t| t.to_string())
+            .unwrap_or_default(),
+        etag: obj.e_tag().map(|s| s.to_string()).unwrap_or_default(),
+        is_folder: obj.key().unwrap_or_default().ends_with('/'),
+    }
+}
+
+fn basename(key: &str) -> String {
+    key.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or(key)
+        .to_string()
+}
+
+pub async fn cleanup_report(
+    client: &Client,
+    bucket: &str,
+    prefix: &str,
+    old_days: u64,
+    large_bytes: u64,
+    max_scanned: u32,
+) -> Result<CleanupReport, AppError> {
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let old_cutoff = now_secs.saturating_sub((old_days.saturating_mul(86_400)) as i64);
+    let mut scanned: u32 = 0;
+    let mut truncated = false;
+    let mut token: Option<String> = None;
+    let mut old_objects = Vec::new();
+    let mut large_objects = Vec::new();
+    let mut empty_folder_markers = Vec::new();
+    let mut by_name: HashMap<String, Vec<BucketFile>> = HashMap::new();
+
+    loop {
+        let mut req = client
+            .list_objects_v2()
+            .bucket(bucket)
+            .prefix(prefix.to_string());
+        if let Some(ref t) = token {
+            req = req.continuation_token(t);
+        }
+        let resp = req.send().await.map_err(map_s3_sdk_error)?;
+
+        for obj in resp.contents() {
+            scanned = scanned.saturating_add(1);
+            let file = object_from_listing(obj);
+            if file.key.is_empty() {
+                continue;
+            }
+            if file.is_folder && file.size == 0 {
+                empty_folder_markers.push(file.clone());
+            }
+            if !file.is_folder {
+                if file.size >= large_bytes {
+                    large_objects.push(file.clone());
+                }
+                if obj
+                    .last_modified()
+                    .map(|t| t.secs() <= old_cutoff)
+                    .unwrap_or(false)
+                {
+                    old_objects.push(file.clone());
+                }
+                by_name.entry(basename(&file.key)).or_default().push(file);
+            }
+            if scanned >= max_scanned {
+                truncated = true;
+                break;
+            }
+        }
+
+        if truncated {
+            break;
+        }
+        if resp.is_truncated() == Some(true) {
+            token = resp.next_continuation_token().map(|s| s.to_string());
+            if token.is_none() {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    let mut duplicate_name_groups: Vec<DuplicateNameGroup> = by_name
+        .into_iter()
+        .filter_map(|(name, objects)| {
+            if objects.len() > 1 {
+                Some(DuplicateNameGroup { name, objects })
+            } else {
+                None
+            }
+        })
+        .collect();
+    duplicate_name_groups.sort_by(|a, b| b.objects.len().cmp(&a.objects.len()));
+    large_objects.sort_by(|a, b| b.size.cmp(&a.size));
+    old_objects.sort_by(|a, b| a.last_modified.cmp(&b.last_modified));
+
+    let noncurrent_versions = list_noncurrent_versions_under_prefix(client, bucket, prefix)
+        .await
+        .unwrap_or_default();
+
+    Ok(CleanupReport {
+        scanned,
+        truncated,
+        old_objects,
+        large_objects,
+        duplicate_name_groups,
+        empty_folder_markers,
+        noncurrent_versions,
+    })
+}
+
+fn top_level_prefix(prefix: &str, key: &str) -> String {
+    let rest = key.strip_prefix(prefix).unwrap_or(key);
+    match rest.split('/').next() {
+        Some(part) if !part.is_empty() && rest.contains('/') => {
+            if prefix.is_empty() {
+                format!("{part}/")
+            } else {
+                format!("{prefix}{part}/")
+            }
+        }
+        _ => prefix.to_string(),
+    }
+}
+
+fn file_type_for_key(key: &str) -> String {
+    let name = basename(key).to_lowercase();
+    match name.rsplit_once('.') {
+        Some((_, ext)) if !ext.is_empty() => ext.to_string(),
+        _ => "no extension".to_string(),
+    }
+}
+
+pub async fn usage_summary(
+    client: &Client,
+    bucket: &str,
+    prefix: &str,
+    max_scanned: u32,
+) -> Result<UsageSummary, AppError> {
+    let mut scanned: u32 = 0;
+    let mut truncated = false;
+    let mut token: Option<String> = None;
+    let mut total_size: u64 = 0;
+    let mut object_count: u32 = 0;
+    let mut by_prefix: HashMap<String, (u64, u32)> = HashMap::new();
+    let mut by_type: HashMap<String, (u64, u32)> = HashMap::new();
+
+    loop {
+        let mut req = client
+            .list_objects_v2()
+            .bucket(bucket)
+            .prefix(prefix.to_string());
+        if let Some(ref t) = token {
+            req = req.continuation_token(t);
+        }
+        let resp = req.send().await.map_err(map_s3_sdk_error)?;
+
+        for obj in resp.contents() {
+            scanned = scanned.saturating_add(1);
+            let key = obj.key().unwrap_or_default();
+            if key.is_empty() || key.ends_with('/') {
+                continue;
+            }
+            let size = obj.size().unwrap_or(0) as u64;
+            total_size = total_size.saturating_add(size);
+            object_count = object_count.saturating_add(1);
+            let prefix_entry = by_prefix
+                .entry(top_level_prefix(prefix, key))
+                .or_insert((0, 0));
+            prefix_entry.0 = prefix_entry.0.saturating_add(size);
+            prefix_entry.1 = prefix_entry.1.saturating_add(1);
+            let type_entry = by_type.entry(file_type_for_key(key)).or_insert((0, 0));
+            type_entry.0 = type_entry.0.saturating_add(size);
+            type_entry.1 = type_entry.1.saturating_add(1);
+            if scanned >= max_scanned {
+                truncated = true;
+                break;
+            }
+        }
+
+        if truncated {
+            break;
+        }
+        if resp.is_truncated() == Some(true) {
+            token = resp.next_continuation_token().map(|s| s.to_string());
+            if token.is_none() {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    let mut largest_prefixes: Vec<PrefixUsage> = by_prefix
+        .into_iter()
+        .map(|(prefix, (size, count))| PrefixUsage {
+            prefix,
+            size,
+            count,
+        })
+        .collect();
+    largest_prefixes.sort_by(|a, b| b.size.cmp(&a.size));
+    largest_prefixes.truncate(12);
+
+    let mut file_types: Vec<FileTypeUsage> = by_type
+        .into_iter()
+        .map(|(file_type, (size, count))| FileTypeUsage {
+            file_type,
+            size,
+            count,
+        })
+        .collect();
+    file_types.sort_by(|a, b| b.size.cmp(&a.size));
+    file_types.truncate(12);
+
+    Ok(UsageSummary {
+        scanned,
+        truncated,
+        total_size,
+        object_count,
+        largest_prefixes,
+        file_types,
+    })
+}
+
+pub async fn copy_object_between_buckets(
+    source_client: &Client,
+    source_bucket: &str,
+    target_client: &Client,
+    target_bucket: &str,
+    from_key: &str,
+    to_key: &str,
+) -> Result<(), AppError> {
+    let resp = source_client
+        .get_object()
+        .bucket(source_bucket)
+        .key(from_key)
+        .send()
+        .await
+        .map_err(map_s3_sdk_error)?;
+    target_client
+        .put_object()
+        .bucket(target_bucket)
+        .key(to_key)
+        .body(resp.body)
+        .send()
+        .await
+        .map_err(map_s3_sdk_error)?;
+    Ok(())
+}
+
 fn copy_source_for_key(bucket: &str, key: &str) -> String {
     let enc: String = key
         .split('/')
@@ -256,9 +578,12 @@ pub async fn put_object_from_file(
     let meta = tokio::fs::metadata(local_path).await?;
     let total = meta.len();
     emitter.start("upload", key, Some(total));
-    let body = ByteStream::from_path(local_path)
-        .await
-        .map_err(|e| AppError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+    let body = ByteStream::from_path(local_path).await.map_err(|e| {
+        AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            e.to_string(),
+        ))
+    })?;
     let res = client
         .put_object()
         .bucket(bucket)
@@ -295,9 +620,7 @@ pub async fn get_object_to_file(
         .send()
         .await
         .map_err(map_s3_sdk_error)?;
-    let total: Option<u64> = head
-        .content_length()
-        .and_then(|c| u64::try_from(c).ok());
+    let total: Option<u64> = head.content_length().and_then(|c| u64::try_from(c).ok());
 
     emitter.start("download", key, total);
 
@@ -392,9 +715,7 @@ pub async fn list_all_keys_under_prefix(
 
     loop {
         if keys.len() >= max {
-            return Err(AppError::TooManyObjects {
-                max: max_keys,
-            });
+            return Err(AppError::TooManyObjects { max: max_keys });
         }
         let mut req = client
             .list_objects_v2()
@@ -410,9 +731,7 @@ pub async fn list_all_keys_under_prefix(
             if !k.is_empty() {
                 keys.push(k.to_string());
                 if keys.len() >= max {
-                    return Err(AppError::TooManyObjects {
-                        max: max_keys,
-                    });
+                    return Err(AppError::TooManyObjects { max: max_keys });
                 }
             }
         }
@@ -430,11 +749,68 @@ pub async fn list_all_keys_under_prefix(
     Ok(keys)
 }
 
-pub async fn put_folder_marker(
+pub async fn preview_delete_prefix(
     client: &Client,
     bucket: &str,
-    key: &str,
-) -> Result<(), AppError> {
+    prefix: &str,
+    max_keys: u32,
+) -> Result<crate::s3::types::DeletePreview, AppError> {
+    let mut token: Option<String> = None;
+    let mut object_count: u32 = 0;
+    let mut total_size: u64 = 0;
+    let mut sample_keys: Vec<String> = Vec::new();
+
+    loop {
+        let mut req = client
+            .list_objects_v2()
+            .bucket(bucket)
+            .prefix(prefix.to_string());
+        if let Some(ref t) = token {
+            req = req.continuation_token(t);
+        }
+        let resp = req.send().await.map_err(map_s3_sdk_error)?;
+
+        for obj in resp.contents() {
+            let key = obj.key().unwrap_or("");
+            if key.is_empty() {
+                continue;
+            }
+            object_count = object_count.saturating_add(1);
+            if let Some(size) = obj.size().and_then(|s| u64::try_from(s).ok()) {
+                total_size = total_size.saturating_add(size);
+            }
+            if sample_keys.len() < 8 {
+                sample_keys.push(key.to_string());
+            }
+            if object_count >= max_keys {
+                return Ok(crate::s3::types::DeletePreview {
+                    object_count,
+                    total_size,
+                    truncated: true,
+                    sample_keys,
+                });
+            }
+        }
+
+        if resp.is_truncated() == Some(true) {
+            token = resp.next_continuation_token().map(|s| s.to_string());
+            if token.is_none() {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    Ok(crate::s3::types::DeletePreview {
+        object_count,
+        total_size,
+        truncated: false,
+        sample_keys,
+    })
+}
+
+pub async fn put_folder_marker(client: &Client, bucket: &str, key: &str) -> Result<(), AppError> {
     if !key.ends_with('/') || key.len() < 2 {
         return Err(AppError::InvalidKey(
             "Folder key must end with / and not be empty".into(),
@@ -496,10 +872,7 @@ pub async fn list_object_versions(
             continue;
         }
         let version_id = v.version_id().unwrap_or("null").to_string();
-        let last_modified = v
-            .last_modified()
-            .map(|t| t.to_string())
-            .unwrap_or_default();
+        let last_modified = v.last_modified().map(|t| t.to_string()).unwrap_or_default();
         let size = v.size().unwrap_or(0) as u64;
         let is_latest = v.is_latest().unwrap_or(false);
         let etag = v.e_tag().map(|s| s.to_string()).unwrap_or_default();
@@ -515,6 +888,41 @@ pub async fn list_object_versions(
 
     versions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
 
+    Ok(versions)
+}
+
+pub async fn list_noncurrent_versions_under_prefix(
+    client: &Client,
+    bucket: &str,
+    prefix: &str,
+) -> Result<Vec<FileVersion>, AppError> {
+    let resp = client
+        .list_object_versions()
+        .bucket(bucket)
+        .prefix(prefix)
+        .send()
+        .await
+        .map_err(map_s3_sdk_error)?;
+    let mut versions = Vec::new();
+
+    for v in resp.versions() {
+        if v.is_latest().unwrap_or(false) {
+            continue;
+        }
+        let version_id = v.version_id().unwrap_or("null").to_string();
+        let last_modified = v.last_modified().map(|t| t.to_string()).unwrap_or_default();
+        let size = v.size().unwrap_or(0) as u64;
+        let etag = v.e_tag().map(|s| s.to_string()).unwrap_or_default();
+        versions.push(FileVersion {
+            version_id,
+            last_modified,
+            size,
+            is_latest: false,
+            etag,
+        });
+    }
+
+    versions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
     Ok(versions)
 }
 
@@ -536,9 +944,7 @@ pub async fn get_object_version_to_file(
         .send()
         .await
         .map_err(map_s3_sdk_error)?;
-    let total: Option<u64> = head
-        .content_length()
-        .and_then(|c| u64::try_from(c).ok());
+    let total: Option<u64> = head.content_length().and_then(|c| u64::try_from(c).ok());
 
     emitter.start("download", key, total);
 

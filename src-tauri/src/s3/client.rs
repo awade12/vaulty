@@ -53,13 +53,7 @@ pub async fn build_client_raw(
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "auto".to_string());
 
-    let creds = Credentials::new(
-        access_key_id,
-        secret_access_key,
-        None,
-        None,
-        "vaulty",
-    );
+    let creds = Credentials::new(access_key_id, secret_access_key, None, None, "vaulty");
 
     let config = aws_sdk_s3::Config::builder()
         .behavior_version(BehaviorVersion::latest())
@@ -72,10 +66,7 @@ pub async fn build_client_raw(
     Ok(Client::from_conf(config))
 }
 
-pub async fn build_client(
-    conn: &ConnectionConfig,
-    secret: &str,
-) -> Result<Client, AppError> {
+pub async fn build_client(conn: &ConnectionConfig, secret: &str) -> Result<Client, AppError> {
     let region = conn.region.as_deref();
     build_client_raw(
         &conn.provider,

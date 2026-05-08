@@ -2,6 +2,7 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 import { toast } from "sonner";
 
 import type { PendingDelete } from "../dashboard/utils/deleteModalCopy";
+import { previewDelete } from "../lib/tauri";
 import {
   useBulkDeleteMutation,
   useDeleteFileMutation,
@@ -9,6 +10,16 @@ import {
 } from "./useBucketFileMutations";
 import { folderConfirmToken, handleTauriError } from "../lib/utils";
 import type { BucketFile } from "../types";
+import type { DeletePreview } from "../types";
+
+function singlePreview(file: BucketFile): DeletePreview {
+  return {
+    objectCount: 1,
+    totalSize: file.size,
+    truncated: false,
+    sampleKeys: [file.key],
+  };
+}
 
 interface UseDashboardDeleteFlowParams {
   prefix: string;
@@ -28,7 +39,7 @@ export function useDashboardDeleteFlow({
   const recursiveDeleteMut = useRecursiveDeleteMutation();
 
   function handleDeleteRequest(file: BucketFile): void {
-    setPendingDelete({ kind: "single", file });
+    setPendingDelete({ kind: "single", file, preview: singlePreview(file) });
   }
 
   function handleBulkDeleteRequest(): void {
@@ -36,14 +47,14 @@ export function useDashboardDeleteFlow({
     if (keys.length === 0) {
       return;
     }
-    setPendingDelete({ kind: "bulk", keys });
+    void loadBulkPreview(keys);
   }
 
   function handleBulkDeleteWithKeys(keys: string[]): void {
     if (keys.length === 0) {
       return;
     }
-    setPendingDelete({ kind: "bulk", keys });
+    void loadBulkPreview(keys);
   }
 
   function handleRecursiveRequestForPrefix(): void {
@@ -52,12 +63,38 @@ export function useDashboardDeleteFlow({
       return;
     }
     const token = folderConfirmToken(prefix);
-    setPendingDelete({ kind: "recursive", prefix, token });
+    void loadRecursivePreview(prefix, token);
   }
 
   function handleRecursiveRequestFolder(folder: BucketFile): void {
     const token = folderConfirmToken(folder.key);
-    setPendingDelete({ kind: "recursive", prefix: folder.key, token });
+    void loadRecursivePreview(folder.key, token);
+  }
+
+  async function loadBulkPreview(keys: string[]): Promise<void> {
+    try {
+      const preview = await previewDelete({ keys });
+      setPendingDelete({ kind: "bulk", keys, preview });
+    } catch (e) {
+      toast.error(handleTauriError(e));
+    }
+  }
+
+  async function loadRecursivePreview(
+    recursivePrefix: string,
+    token: string,
+  ): Promise<void> {
+    try {
+      const preview = await previewDelete({ prefix: recursivePrefix });
+      setPendingDelete({
+        kind: "recursive",
+        prefix: recursivePrefix,
+        token,
+        preview,
+      });
+    } catch (e) {
+      toast.error(handleTauriError(e));
+    }
   }
 
   function handleDeleteModalClose(): void {

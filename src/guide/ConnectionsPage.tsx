@@ -1,7 +1,5 @@
-import { isTauri } from "@tauri-apps/api/core";
-import { getVersion } from "@tauri-apps/api/app";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -22,17 +20,21 @@ import type { ListBucketsCredentials } from "../types";
 import ConnectionForm, {
   type ConnectionFormPrefill,
   type ConnectionFormValues,
-} from "./components/ConnectionForm";
-import ConnectionListItem from "./components/ConnectionListItem";
-import DatabaseIcon from "./components/DatabaseIcon";
-import DiscoverBucketsModal from "./components/DiscoverBucketsModal";
-import AppearancePreferences from "./components/AppearancePreferences";
-import DownloadsPreferences from "./components/DownloadsPreferences";
-import UpdatesPreferences from "./components/UpdatesPreferences";
-import StorageAccountsPanel from "./components/StorageAccountsPanel";
-import ActivityLogPanel from "./components/ActivityLogPanel";
+} from "../settings/components/ConnectionForm";
+import ConnectionListItem from "../settings/components/ConnectionListItem";
+import DiscoverBucketsModal from "../settings/components/DiscoverBucketsModal";
+import StorageAccountsPanel from "../settings/components/StorageAccountsPanel";
+import ActivityLogPanel from "../settings/components/ActivityLogPanel";
 
-export default function Settings() {
+function DatabaseIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
+    </svg>
+  );
+}
+
+export default function ConnectionsPage() {
   const queryClient = useQueryClient();
   const { data: connections = [], isLoading } = useConnectionsQuery();
   const { data: credentialProfiles = [] } = useQuery({
@@ -50,9 +52,7 @@ export default function Settings() {
   const [useBusy, setUseBusy] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [discoverOpen, setDiscoverOpen] = useState(false);
-  const [discoverCreds, setDiscoverCreds] =
-    useState<ListBucketsCredentials | null>(null);
-  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [discoverCreds, setDiscoverCreds] = useState<ListBucketsCredentials | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const prefill = useMemo<ConnectionFormPrefill | null>(() => {
@@ -67,11 +67,6 @@ export default function Settings() {
     };
   }, [searchParams]);
 
-  useEffect(() => {
-    if (!isTauri()) return;
-    void getVersion().then(setAppVersion);
-  }, []);
-
   const editingDraft = useMemo(
     () => connections.find((c) => c.id === editingId) ?? null,
     [connections, editingId],
@@ -85,8 +80,7 @@ export default function Settings() {
 
   const addMutation = useMutation({
     mutationFn: (values: ConnectionFormValues) => {
-      const region =
-        values.region.trim() === "" ? null : values.region.trim();
+      const region = values.region.trim() === "" ? null : values.region.trim();
       return addConnection({
         label: values.label,
         provider: values.provider,
@@ -101,6 +95,7 @@ export default function Settings() {
     onSuccess: async (conn) => {
       await queryClient.invalidateQueries({ queryKey: ["connections"] });
       await queryClient.invalidateQueries({ queryKey: ["credential-profiles"] });
+      await queryClient.invalidateQueries({ queryKey: ["activity"] });
       setSessionReady(false);
       setActiveConnectionId(conn.id);
       toast.success("Connection saved");
@@ -112,8 +107,7 @@ export default function Settings() {
 
   const updateMutation = useMutation({
     mutationFn: (values: ConnectionFormValues & { id: string }) => {
-      const region =
-        values.region.trim() === "" ? null : values.region.trim();
+      const region = values.region.trim() === "" ? null : values.region.trim();
       const secretTrim = values.secretAccessKey.trim();
       return updateConnection({
         id: values.id,
@@ -129,6 +123,7 @@ export default function Settings() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["connections"] });
       await queryClient.invalidateQueries({ queryKey: ["credential-profiles"] });
+      await queryClient.invalidateQueries({ queryKey: ["activity"] });
       setEditingId(null);
       setSessionReady(false);
       toast.success("Connection updated");
@@ -142,6 +137,7 @@ export default function Settings() {
     mutationFn: (id: string) => duplicateConnection(id),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["connections"] });
+      await queryClient.invalidateQueries({ queryKey: ["activity"] });
       toast.success("Connection duplicated");
     },
     onError: (e) => {
@@ -164,6 +160,7 @@ export default function Settings() {
     onSuccess: (_, id) => {
       void queryClient.invalidateQueries({ queryKey: ["connections"] });
       void queryClient.invalidateQueries({ queryKey: ["credential-profiles"] });
+      void queryClient.invalidateQueries({ queryKey: ["activity"] });
       void queryClient.invalidateQueries({ queryKey: ["bucket-files"] });
       if (activeConnectionId === id) {
         setActiveConnectionId(null);
@@ -179,15 +176,10 @@ export default function Settings() {
   });
 
   const existingForDiscover = useMemo(() => {
-    if (discoverCreds == null) {
-      return [];
-    }
+    if (discoverCreds == null) return [];
     const ep = discoverCreds.endpoint.trim();
     return connections
-      .filter(
-        (c) =>
-          c.provider === discoverCreds.provider && c.endpoint.trim() === ep,
-      )
+      .filter((c) => c.provider === discoverCreds.provider && c.endpoint.trim() === ep)
       .map((c) => c.bucket);
   }, [connections, discoverCreds]);
 
@@ -204,6 +196,7 @@ export default function Settings() {
   function handleDiscoverAdded(): void {
     void queryClient.invalidateQueries({ queryKey: ["connections"] });
     void queryClient.invalidateQueries({ queryKey: ["credential-profiles"] });
+    void queryClient.invalidateQueries({ queryKey: ["activity"] });
     setSessionReady(false);
   }
 
@@ -262,85 +255,61 @@ export default function Settings() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-white">
-      <header className="flex h-12 items-center justify-between border-b border-[0.5px] border-zinc-200 bg-zinc-50 px-6">
-        <h1 className="text-sm font-medium text-zinc-900">Settings</h1>
-        {appVersion != null && (
-          <span className="rounded-full bg-white px-2 py-0.5 font-mono text-[11px] text-zinc-500 ring-1 ring-inset ring-zinc-200">
-            v{appVersion}
-          </span>
-        )}
-      </header>
-      <div className="flex min-h-0 flex-1 gap-8 overflow-auto p-6">
-        <div className="min-w-0 flex-1">
-          <DownloadsPreferences />
-          <AppearancePreferences />
-          <UpdatesPreferences />
-          <StorageAccountsPanel profiles={credentialProfiles} />
-          <ActivityLogPanel events={activity} />
-          <div className="mb-5 flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100">
-              <DatabaseIcon className="h-5 w-5 text-zinc-500" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-zinc-900">Connections</p>
-              <p className="text-xs text-zinc-400">
-                {connections.length} saved connection{connections.length !== 1 ? "s" : ""}
-              </p>
-            </div>
+    <div className="flex h-full">
+      <div className="min-w-0 flex-1 overflow-auto p-6">
+        <StorageAccountsPanel profiles={credentialProfiles} />
+        <ActivityLogPanel events={activity} />
+
+        <h2 className="mb-4 text-sm font-medium text-zinc-900">
+          Connections
+        </h2>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-200 border-t-accent-700" />
           </div>
-          {isLoading ? (
-            <div className="flex items-center justify-center py-16">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-200 border-t-accent-700" />
-            </div>
-          ) : connections.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-xl border border-[0.5px] border-dashed border-zinc-200 bg-zinc-50 py-16">
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-100">
-                <DatabaseIcon className="h-6 w-6 text-zinc-400" />
-              </div>
-              <p className="text-sm font-medium text-zinc-900">No connections yet</p>
-              <p className="mt-1 text-xs text-zinc-400">
-                Add your first S3-compatible connection to get started
-              </p>
-            </div>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {connections.map((c) => (
-                <ConnectionListItem
-                  activateBusy={
-                    useBusy ||
-                    addMutation.isPending ||
-                    updateMutation.isPending
-                  }
-                  connection={c}
-                  healthBusy={healthMutation.isPending}
-                  isActive={c.id === activeConnectionId}
-                  key={c.id}
-                  onActivate={handleActivate}
-                  onDuplicate={handleDuplicate}
-                  onEdit={handleEdit}
-                  onHealth={handleHealth}
-                  onRemove={handleRemove}
-                  removeBusy={removeMutation.isPending}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
-        <div className="w-full max-w-sm shrink-0">
-          <ConnectionForm
-            credentialProfiles={credentialProfiles}
-            draft={editingDraft}
-            isPending={addMutation.isPending || updateMutation.isPending}
-            onCancelDraft={editingDraft != null ? handleCancelEdit : undefined}
-            onDiscoverRequest={
-              editingDraft == null ? handleDiscoverRequest : undefined
-            }
-            onSubmit={handleFormSubmit}
-            prefill={editingDraft == null ? prefill : null}
-          />
-        </div>
+        ) : connections.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-lg border border-[0.5px] border-dashed border-zinc-200 py-16">
+            <DatabaseIcon className="h-8 w-8 text-zinc-300 mb-3" />
+            <p className="text-sm text-zinc-500">No connections yet</p>
+            <p className="text-xs text-zinc-400 mt-1">Add one using the form</p>
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {connections.map((c) => (
+              <ConnectionListItem
+                activateBusy={useBusy || addMutation.isPending || updateMutation.isPending}
+                connection={c}
+                healthBusy={healthMutation.isPending}
+                isActive={c.id === activeConnectionId}
+                key={c.id}
+                onActivate={handleActivate}
+                onDuplicate={handleDuplicate}
+                onEdit={handleEdit}
+                onHealth={handleHealth}
+                onRemove={handleRemove}
+                removeBusy={removeMutation.isPending}
+              />
+            ))}
+          </ul>
+        )}
       </div>
+
+      <div className="w-80 shrink-0 border-l border-[0.5px] border-zinc-200 bg-zinc-50 overflow-auto p-6">
+        <h2 className="mb-4 text-sm font-medium text-zinc-900">
+          {editingDraft ? "Edit" : "New Connection"}
+        </h2>
+        <ConnectionForm
+          credentialProfiles={credentialProfiles}
+          draft={editingDraft}
+          isPending={addMutation.isPending || updateMutation.isPending}
+          onCancelDraft={editingDraft != null ? handleCancelEdit : undefined}
+          onDiscoverRequest={editingDraft == null ? handleDiscoverRequest : undefined}
+          onSubmit={handleFormSubmit}
+          prefill={editingDraft == null ? prefill : null}
+        />
+      </div>
+
       <DiscoverBucketsModal
         credentials={discoverCreds}
         existingBucketNames={existingForDiscover}

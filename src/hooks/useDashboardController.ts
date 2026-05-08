@@ -5,10 +5,12 @@ import { useConnectionsQuery } from "./useConnectionsQuery";
 import { useDashboardFileCommands } from "./useDashboardFileCommands";
 import { useDashboardListing } from "./useDashboardListing";
 import { useTransferProgress } from "./useTransferProgress";
+import { useFolderSync } from "./useFolderSync";
 import { handleTauriError } from "../lib/utils";
 import { useBucketStore } from "../store/bucketStore";
 
 export function useDashboardController() {
+  useFolderSync();
   const list = useDashboardListing();
   const activeConnectionId = useBucketStore((s) => s.activeConnectionId);
   const sessionReady = useBucketStore((s) => s.sessionReady);

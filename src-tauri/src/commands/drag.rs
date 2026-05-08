@@ -100,7 +100,10 @@ pub async fn start_drag_export(
     // shouldn't block returning the staged path to the JS caller.
     #[cfg(target_os = "macos")]
     {
-        let _ = std::process::Command::new("open").arg("-R").arg(&dest).spawn();
+        let _ = std::process::Command::new("open")
+            .arg("-R")
+            .arg(&dest)
+            .spawn();
     }
     #[cfg(target_os = "windows")]
     {

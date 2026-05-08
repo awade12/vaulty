@@ -11,9 +11,8 @@ use commands::{bucket, connection, download, drag, object_ops, upload};
 pub fn run() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                tracing_subscriber::EnvFilter::new("info")
-            }),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .try_init();
 
@@ -26,6 +25,10 @@ pub fn run() {
         .manage(state::AppState::default())
         .invoke_handler(tauri::generate_handler![
             connection::list_account_buckets,
+            connection::list_credential_profiles,
+            connection::update_credential_profile,
+            connection::rotate_credential_profile_secret,
+            connection::list_activity,
             connection::bulk_add_connections,
             connection::add_connection,
             connection::list_connections,
@@ -37,10 +40,16 @@ pub fn run() {
             bucket::list_files,
             bucket::search_objects,
             bucket::delete_file,
+            bucket::preview_delete,
             bucket::create_folder,
             bucket::get_presigned_url,
+            bucket::object_exists,
+            bucket::get_object_details,
+            bucket::get_cleanup_report,
+            bucket::get_usage_summary,
             upload::upload_file,
             upload::collect_upload_candidates,
+            upload::delete_local_file,
             download::download_file,
             drag::start_drag_export,
             object_ops::move_object,
@@ -51,6 +60,7 @@ pub fn run() {
             object_ops::download_as_zip,
             object_ops::list_file_versions,
             object_ops::download_file_version,
+            object_ops::transfer_to_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

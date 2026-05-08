@@ -1,31 +1,17 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
-import type { ConnectionConfig, ListBucketsCredentials } from "../../types";
+import type {
+  ConnectionConfig,
+  CredentialProfile,
+  ListBucketsCredentials,
+} from "../../types";
 import {
   PROVIDER_PRESETS,
   applyPreset,
   detectPreset,
   type PresetField,
 } from "../providerPresets";
-
-function PlusIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="M12 4.5v15m7.5-7.5h-15"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 export interface ConnectionFormValues {
   label: string;
@@ -35,6 +21,7 @@ export interface ConnectionFormValues {
   region: string;
   accessKeyId: string;
   secretAccessKey: string;
+  credentialProfileId: string | null;
 }
 
 export interface ConnectionFormPrefill {
@@ -53,10 +40,11 @@ interface ConnectionFormProps {
   onCancelDraft?: () => void;
   onDiscoverRequest?: (credentials: ListBucketsCredentials) => void;
   prefill?: ConnectionFormPrefill | null;
+  credentialProfiles?: CredentialProfile[];
 }
 
 const inputClass =
-  "w-full rounded-lg border border-[0.5px] border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-accent-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-accent-200/40";
+  "w-full rounded-md border border-[0.5px] border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-900 placeholder:text-zinc-400 focus:border-accent-200 focus:outline-none focus:ring-2 focus:ring-accent-200/40";
 
 export default function ConnectionForm({
   isPending,
@@ -65,9 +53,12 @@ export default function ConnectionForm({
   onCancelDraft,
   onDiscoverRequest,
   prefill,
+  credentialProfiles = [],
 }: ConnectionFormProps) {
   const isEdit = draft != null;
   const formRef = useRef<HTMLFormElement>(null);
+  const [selectedProfileId, setSelectedProfileId] = useState<string>("");
+  const useSavedProfile = !isEdit && selectedProfileId !== "";
 
   // Pick a sensible default preset: when editing, detect from existing
   // endpoint; otherwise detect from prefill endpoint or default to R2.
@@ -159,6 +150,7 @@ export default function ConnectionForm({
       region: String(fd.get("region") ?? ""),
       accessKeyId: String(fd.get("accessKeyId") ?? ""),
       secretAccessKey: String(fd.get("secretAccessKey") ?? ""),
+      credentialProfileId: useSavedProfile ? selectedProfileId : null,
     };
     onSubmit(values);
   }
@@ -169,145 +161,181 @@ export default function ConnectionForm({
 
   return (
     <form
-      className="flex flex-col gap-5 rounded-xl border border-[0.5px] border-zinc-200 bg-white p-6"
+      className="flex flex-col gap-4"
       key={draft?.id ?? "new"}
       onSubmit={handleSubmit}
       ref={formRef}
     >
-      <div className="flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent-50">
-          <PlusIcon className="h-5 w-5 text-accent-700" />
+      {!isEdit && credentialProfiles.length > 0 && (
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+            Storage Account
+          </label>
+          <select
+            className={inputClass}
+            onChange={(e) => setSelectedProfileId(e.target.value)}
+            value={selectedProfileId}
+          >
+            <option value="">New storage account</option>
+            {credentialProfiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.label}
+              </option>
+            ))}
+          </select>
         </div>
-        <div>
-          <p className="text-sm font-medium text-zinc-900">
-            {isEdit ? "Edit connection" : "New connection"}
-          </p>
-          <p className="text-xs text-zinc-400">
-            {isEdit ? "Update your connection details" : "Add an S3-compatible bucket"}
-          </p>
-        </div>
-      </div>
+      )}
 
-      <div className="flex flex-col gap-2">
+      {!useSavedProfile && (
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+            Provider
+          </label>
+          <select
+            className={inputClass}
+            name="presetId"
+            onChange={(e) => setPresetId(e.target.value)}
+            value={presetId}
+          >
+            {PROVIDER_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+          <input name="provider" type="hidden" value={preset.provider} />
+        </div>
+      )}
+
+      <div className="space-y-1.5">
         <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-          Basics
+          Name
         </label>
         <input
           className={inputClass}
           defaultValue={draft?.label ?? prefill?.label ?? ""}
           name="label"
-          placeholder="Connection name"
+          placeholder="My connection"
           type="text"
         />
-        <select
-          className={inputClass}
-          name="presetId"
-          onChange={(e) => setPresetId(e.target.value)}
-          value={presetId}
-        >
-          {PROVIDER_PRESETS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-        <p className="text-[11px] leading-snug text-zinc-400">
-          {preset.description}
-          {preset.docsUrl != null && (
-            <>
-              {" "}
-              <a
-                className="text-accent-700 underline-offset-2 hover:underline"
-                href={preset.docsUrl}
-                rel="noreferrer"
-                target="_blank"
-              >
-                Docs
-              </a>
-            </>
-          )}
-        </p>
-        {/* `provider` is always sent as the canonical id (r2/s3/minio). */}
-        <input name="provider" type="hidden" value={preset.provider} />
       </div>
 
-      <div className="flex flex-col gap-2">
-        <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-          Connection
-        </label>
-        {preset.fields.map((f) => (
-          <div className="flex flex-col gap-1" key={f.key}>
-            <input
-              className={inputClass}
-              onChange={(e) => handlePresetFieldChange(f.key, e.target.value)}
-              placeholder={f.placeholder}
-              type="text"
-              value={presetValues[f.key] ?? ""}
-            />
-            {f.helper != null && (
-              <p className="text-[11px] text-zinc-400">{f.helper}</p>
-            )}
-          </div>
-        ))}
-        <input
-          className={inputClass}
-          name="endpoint"
-          onChange={(e) => {
-            setEndpoint(e.target.value);
-            setEndpointTouched(true);
-          }}
-          placeholder="endpoint.example.com"
-          title="Auto-filled from your provider preset. Edit only if you need a custom endpoint."
-          type="text"
-          value={endpoint}
-        />
-        <div className="flex gap-2">
+      {!useSavedProfile && preset.fields.length > 0 && (
+        <div className="space-y-1.5">
+          {preset.fields.map((f) => (
+            <div key={f.key}>
+              <input
+                className={inputClass}
+                onChange={(e) => handlePresetFieldChange(f.key, e.target.value)}
+                placeholder={f.placeholder}
+                type="text"
+                value={presetValues[f.key] ?? ""}
+              />
+              {f.helper != null && (
+                <p className="mt-1 text-[10px] text-zinc-400">{f.helper}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!useSavedProfile && (
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+            Endpoint
+          </label>
+          <input
+            className={inputClass}
+            name="endpoint"
+            onChange={(e) => {
+              setEndpoint(e.target.value);
+              setEndpointTouched(true);
+            }}
+            placeholder="endpoint.example.com"
+            type="text"
+            value={endpoint}
+          />
+        </div>
+      )}
+
+      <div className={useSavedProfile ? "grid gap-2" : "grid grid-cols-2 gap-2"}>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+            Bucket
+          </label>
           <input
             className={inputClass}
             defaultValue={draft?.bucket ?? prefill?.bucket ?? ""}
             name="bucket"
-            placeholder="Bucket name"
+            placeholder="my-bucket"
             type="text"
-          />
-          <input
-            className={inputClass}
-            name="region"
-            onChange={(e) => setRegion(e.target.value)}
-            placeholder={preset.defaultRegion || "Region (auto)"}
-            type="text"
-            value={region}
           />
         </div>
+        {!useSavedProfile && (
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+              Region
+            </label>
+            <input
+              className={inputClass}
+              name="region"
+              onChange={(e) => setRegion(e.target.value)}
+              placeholder={preset.defaultRegion || "auto"}
+              type="text"
+              value={region}
+            />
+          </div>
+        )}
       </div>
 
-      <div className="flex flex-col gap-2">
-        <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-          Credentials
-        </label>
-        <input
-          autoComplete="off"
-          className={inputClass}
-          defaultValue={draft?.accessKeyId ?? prefill?.accessKeyId ?? ""}
-          name="accessKeyId"
-          placeholder="Access key ID"
-          type="text"
-        />
-        <input
-          className={inputClass}
-          defaultValue={prefill?.secretAccessKey ?? ""}
-          name="secretAccessKey"
-          placeholder={
-            isEdit ? "New secret (optional)" : "Secret access key"
-          }
-          type="password"
-        />
-      </div>
+      {!useSavedProfile && (
+        <>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+              Access Key
+            </label>
+            <input
+              autoComplete="off"
+              className={inputClass}
+              defaultValue={draft?.accessKeyId ?? prefill?.accessKeyId ?? ""}
+              name="accessKeyId"
+              placeholder="AKIAIOSFODNN7EXAMPLE"
+              type="text"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+              Secret Key
+            </label>
+            <input
+              className={inputClass}
+              defaultValue={prefill?.secretAccessKey ?? ""}
+              name="secretAccessKey"
+              placeholder={
+                isEdit ? "Leave blank to keep current" : "••••••••••••••••"
+              }
+              type="password"
+            />
+          </div>
+        </>
+      )}
 
       <div className="flex flex-col gap-2 pt-2">
+        {!isEdit && !useSavedProfile && onDiscoverRequest != null && (
+          <button
+            className="w-full rounded-md border border-[0.5px] border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+            disabled={isPending}
+            onClick={handleDiscoverClick}
+            type="button"
+          >
+            Discover buckets…
+          </button>
+        )}
         <div className="flex gap-2">
           {isEdit && onCancelDraft != null && (
             <button
-              className="flex-1 rounded-lg bg-zinc-100 px-4 py-2.5 text-sm text-zinc-600 hover:bg-zinc-200 disabled:opacity-50"
+              className="flex-1 rounded-md bg-white border border-[0.5px] border-zinc-200 px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
               disabled={isPending}
               onClick={handleCancelClick}
               type="button"
@@ -316,23 +344,13 @@ export default function ConnectionForm({
             </button>
           )}
           <button
-            className="min-w-0 flex-1 rounded-lg bg-accent-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-800 active:bg-accent-950 disabled:opacity-50"
+            className="min-w-0 flex-1 rounded-md bg-accent-700 px-3 py-2 text-xs font-medium text-white hover:bg-accent-800 active:bg-accent-950 disabled:opacity-50"
             disabled={isPending}
             type="submit"
           >
-            {isPending ? "Saving…" : isEdit ? "Save changes" : "Save connection"}
+            {isPending ? "Saving…" : isEdit ? "Save" : "Add Connection"}
           </button>
         </div>
-        {!isEdit && onDiscoverRequest != null && (
-          <button
-            className="w-full rounded-lg bg-zinc-100 px-4 py-2.5 text-sm text-zinc-600 hover:bg-zinc-200 disabled:opacity-50"
-            disabled={isPending}
-            onClick={handleDiscoverClick}
-            type="button"
-          >
-            Discover buckets in account…
-          </button>
-        )}
       </div>
     </form>
   );

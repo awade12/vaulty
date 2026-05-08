@@ -70,6 +70,14 @@ function HistoryIcon({ className }: { className?: string }) {
   );
 }
 
+function InfoIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
+    </svg>
+  );
+}
+
 interface MenuItemProps {
   icon: React.FC<{ className?: string }>;
   label: string;
@@ -112,6 +120,7 @@ interface FileContextMenuProps {
   onRenameFile?: (file: BucketFile) => void;
   onDuplicateFile?: (file: BucketFile) => void;
   onShowVersions?: (file: BucketFile) => void;
+  onShowDetails?: (file: BucketFile) => void;
   onDeleteFile?: (file: BucketFile) => void;
   onRecursiveDeleteFolder?: (file: BucketFile) => void;
   onSetFolderColor?: (file: BucketFile, color: FolderColor) => void;
@@ -163,6 +172,7 @@ export default function FileContextMenu({
   onRenameFile,
   onDuplicateFile,
   onShowVersions,
+  onShowDetails,
   onDeleteFile,
   onRecursiveDeleteFolder,
   onSetFolderColor,
@@ -299,6 +309,14 @@ export default function FileContextMenu({
               icon={HistoryIcon}
               label="Version history"
               onClick={handleAction(() => onShowVersions(file))}
+            />
+          )}
+          {onShowDetails && (
+            <MenuItem
+              disabled={isActionPending}
+              icon={InfoIcon}
+              label="Details"
+              onClick={handleAction(() => onShowDetails(file))}
             />
           )}
           {onDeleteFile && (

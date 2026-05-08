@@ -25,6 +25,7 @@ export default function DiscoverBucketRow({
       <input
         checked={isChecked}
         className="h-3.5 w-3.5 shrink-0 rounded border-[0.5px] border-zinc-200 text-accent-700 focus:ring-accent-200"
+        disabled={isSaved}
         id={id}
         onChange={handleChange}
         type="checkbox"

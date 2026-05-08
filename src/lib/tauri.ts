@@ -2,10 +2,16 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   BucketFile,
+  ActivityEvent,
   BulkAddConnectionsResult,
   ConnectionConfig,
+  CleanupReport,
+  CredentialProfile,
+  DeletePreview,
   FileVersion,
   LocalUploadItem,
+  ObjectDetails,
+  UsageSummary,
 } from "../types";
 
 export async function addConnection(payload: {
@@ -16,6 +22,7 @@ export async function addConnection(payload: {
   region: string | null;
   accessKeyId: string;
   secretAccessKey: string;
+  credentialProfileId?: string | null;
 }): Promise<ConnectionConfig> {
   return invoke<ConnectionConfig>("add_connection", {
     label: payload.label,
@@ -25,7 +32,36 @@ export async function addConnection(payload: {
     region: payload.region,
     accessKeyId: payload.accessKeyId,
     secretAccessKey: payload.secretAccessKey,
+    credentialProfileId: payload.credentialProfileId ?? null,
   });
+}
+
+export async function listCredentialProfiles(): Promise<CredentialProfile[]> {
+  return invoke<CredentialProfile[]>("list_credential_profiles");
+}
+
+export async function updateCredentialProfile(payload: {
+  id: string;
+  label: string;
+}): Promise<CredentialProfile> {
+  return invoke<CredentialProfile>("update_credential_profile", {
+    id: payload.id,
+    label: payload.label,
+  });
+}
+
+export async function rotateCredentialProfileSecret(payload: {
+  id: string;
+  secretAccessKey: string;
+}): Promise<void> {
+  return invoke<void>("rotate_credential_profile_secret", {
+    id: payload.id,
+    secretAccessKey: payload.secretAccessKey,
+  });
+}
+
+export async function listActivity(): Promise<ActivityEvent[]> {
+  return invoke<ActivityEvent[]>("list_activity");
 }
 
 export async function listConnections(): Promise<ConnectionConfig[]> {
@@ -80,12 +116,26 @@ export async function uploadFile(
   return invoke<void>("upload_file", { localPath, key });
 }
 
+export async function deleteLocalFile(localPath: string): Promise<void> {
+  return invoke<void>("delete_local_file", { localPath });
+}
+
 export async function downloadFile(key: string, destPath: string): Promise<void> {
   return invoke<void>("download_file", { key, destPath });
 }
 
 export async function deleteFile(key: string): Promise<void> {
   return invoke<void>("delete_file", { key });
+}
+
+export async function previewDelete(payload: {
+  keys?: string[];
+  prefix?: string;
+}): Promise<DeletePreview> {
+  return invoke<DeletePreview>("preview_delete", {
+    keys: payload.keys ?? null,
+    prefix: payload.prefix ?? null,
+  });
 }
 
 export async function createFolder(key: string): Promise<void> {
@@ -99,6 +149,38 @@ export async function getPresignedUrl(
   return invoke<string>("get_presigned_url", {
     key,
     expiresInSecs: expiresInSecs ?? null,
+  });
+}
+
+export async function objectExists(key: string): Promise<boolean> {
+  return invoke<boolean>("object_exists", { key });
+}
+
+export async function getObjectDetails(key: string): Promise<ObjectDetails> {
+  return invoke<ObjectDetails>("get_object_details", { key });
+}
+
+export async function getCleanupReport(payload: {
+  prefix: string;
+  oldDays?: number;
+  largeBytes?: number;
+  maxScanned?: number;
+}): Promise<CleanupReport> {
+  return invoke<CleanupReport>("get_cleanup_report", {
+    prefix: payload.prefix,
+    oldDays: payload.oldDays ?? null,
+    largeBytes: payload.largeBytes ?? null,
+    maxScanned: payload.maxScanned ?? null,
+  });
+}
+
+export async function getUsageSummary(payload: {
+  prefix: string;
+  maxScanned?: number;
+}): Promise<UsageSummary> {
+  return invoke<UsageSummary>("get_usage_summary", {
+    prefix: payload.prefix,
+    maxScanned: payload.maxScanned ?? null,
   });
 }
 
@@ -148,6 +230,18 @@ export async function downloadFileVersion(
   destPath: string,
 ): Promise<void> {
   return invoke<void>("download_file_version", { key, versionId, destPath });
+}
+
+export async function transferToConnection(payload: {
+  targetConnectionId: string;
+  keys: string[];
+  deleteSource: boolean;
+}): Promise<number> {
+  return invoke<number>("transfer_to_connection", {
+    targetConnectionId: payload.targetConnectionId,
+    keys: payload.keys,
+    deleteSource: payload.deleteSource,
+  });
 }
 
 export async function updateConnection(payload: {

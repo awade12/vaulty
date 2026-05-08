@@ -5,10 +5,24 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { useConnectionsQuery } from "../hooks/useConnectionsQuery";
+import { useCredentialProfilesQuery } from "../hooks/useCredentialProfilesQuery";
 import { useRestoreSession } from "../hooks/useRestoreSession";
 import { activateConnection } from "../lib/tauri";
 import { handleTauriError } from "../lib/utils";
 import { useBucketStore } from "../store/bucketStore";
+import type { ConnectionConfig, CredentialProfile } from "../types";
+import { getProviderConfig } from "./ProviderIcons";
+
+function sidebarConnectionPrimary(
+  conn: ConnectionConfig,
+  profiles: CredentialProfile[],
+): string {
+  const profile = profiles.find((p) => p.id === conn.credentialProfileId);
+  if (conn.label !== conn.bucket) {
+    return conn.label;
+  }
+  return profile?.label ?? conn.label;
+}
 
 function FilesIcon({ className }: { className?: string }) {
   return (
@@ -69,31 +83,6 @@ function VaultIcon({ className }: { className?: string }) {
   );
 }
 
-function DatabaseIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function MinIOIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3m-13.5 0V9a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 9v5.25m-4.5-8.625L12 3l-3.75 2.625" />
-    </svg>
-  );
-}
 
 function ChevronDownIcon({ className }: { className?: string }) {
   return (
@@ -107,6 +96,7 @@ export default function AppShell() {
   useRestoreSession();
   const navigate = useNavigate();
   const { data: connections = [] } = useConnectionsQuery();
+  const { data: credentialProfiles = [] } = useCredentialProfilesQuery();
   const activeConnectionId = useBucketStore((s) => s.activeConnectionId);
   const setActiveConnectionId = useBucketStore((s) => s.setActiveConnectionId);
   const setSessionReady = useBucketStore((s) => s.setSessionReady);
@@ -170,40 +160,66 @@ export default function AppShell() {
               </button>
               
               {connectionsExpanded && (
-                <div className="ml-4 mt-1 flex flex-col gap-0.5 border-l border-zinc-200 pl-2">
+                <div className="ml-4 mt-1 flex flex-col gap-2 border-l border-zinc-200 pl-2">
                   {connections.length === 0 ? (
                     <p className="px-2 py-2 text-[11px] text-zinc-400">
                       No connections yet
                     </p>
                   ) : (
-                    connections.map((conn) => (
-                      <button
-                        className={clsx(
-                          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
-                          conn.id === activeConnectionId
-                            ? "bg-accent-50 text-accent-700 font-medium"
-                            : "text-zinc-500 hover:bg-white hover:text-zinc-700"
-                        )}
-                        disabled={switchingTo !== null}
-                        key={conn.id}
-                        onClick={() => handleSwitchConnection(conn.id)}
-                        type="button"
-                      >
-                        <div className={clsx(
-                          "flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
-                          conn.id === activeConnectionId ? "bg-accent-700" : "bg-zinc-100"
-                        )}>
-                          <DatabaseIcon className={clsx(
-                            "h-3 w-3",
-                            conn.id === activeConnectionId ? "text-white" : "text-zinc-400"
-                          )} />
+                    Object.entries(
+                      connections.reduce<Record<string, typeof connections>>((acc, conn) => {
+                        const key = conn.provider.toLowerCase();
+                        if (!acc[key]) acc[key] = [];
+                        acc[key].push(conn);
+                        return acc;
+                      }, {})
+                    ).map(([provider, conns]) => {
+                      const config = getProviderConfig(provider);
+                      const ProviderIcon = config.icon;
+                      return (
+                        <div key={provider}>
+                          <div className="flex items-center gap-1.5 px-2 py-1">
+                            <ProviderIcon className={clsx("h-3.5 w-3.5", config.color)} />
+                            <span className="text-[10px] font-medium text-zinc-400">{config.label}</span>
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                            {conns.map((conn) => {
+                              const primary = sidebarConnectionPrimary(
+                                conn,
+                                credentialProfiles,
+                              );
+                              const showBucketLine = conn.bucket !== primary;
+                              return (
+                              <button
+                                className={clsx(
+                                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
+                                  conn.id === activeConnectionId
+                                    ? "bg-accent-50 text-accent-700 font-medium"
+                                    : "text-zinc-500 hover:bg-white hover:text-zinc-700"
+                                )}
+                                disabled={switchingTo !== null}
+                                key={conn.id}
+                                onClick={() => handleSwitchConnection(conn.id)}
+                                type="button"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <span className="block truncate">{primary}</span>
+                                  {showBucketLine ? (
+                                    <span className="block truncate text-[10px] font-normal text-zinc-400">
+                                      {conn.bucket}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                {switchingTo === conn.id && (
+                                  <div className="h-3 w-3 shrink-0 animate-spin rounded-full border-[1.5px] border-zinc-200 border-t-accent-700" />
+                                )}
+                              </button>
+                              );
+                            })}
+                          </div>
                         </div>
-                        <span className="min-w-0 flex-1 truncate">{conn.label}</span>
-                        {switchingTo === conn.id && (
-                          <div className="h-3 w-3 shrink-0 animate-spin rounded-full border-[1.5px] border-zinc-200 border-t-accent-700" />
-                        )}
-                      </button>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               )}
@@ -216,22 +232,7 @@ export default function AppShell() {
                   ? "bg-white text-zinc-900 font-medium"
                   : "text-zinc-500 hover:bg-white hover:text-zinc-700"
               )}
-              to="/minio"
-            >
-              <div className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-100">
-                <MinIOIcon className="h-4 w-4 text-zinc-400" />
-              </div>
-              MinIO Guide
-            </NavLink>
-
-            <NavLink
-              className={({ isActive }) => clsx(
-                "flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs transition-colors",
-                isActive
-                  ? "bg-white text-zinc-900 font-medium"
-                  : "text-zinc-500 hover:bg-white hover:text-zinc-700"
-              )}
-              to="/settings"
+              to="/guide"
             >
               <div className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-100">
                 <SettingsIcon className="h-4 w-4 text-zinc-400" />

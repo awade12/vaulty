@@ -308,9 +308,12 @@ interface FileGridProps {
   onSelectAll?: () => void;
   onClearSelection?: () => void;
   onBulkDelete?: (keys: string[]) => void;
+  onDeleteSelected?: (files: BucketFile[]) => void;
+  onTransferSelected?: (keys: string[]) => void;
   onBulkDownload?: (keys: string[]) => void;
   onDuplicateFile?: (file: BucketFile) => void;
   onShowVersions?: (file: BucketFile) => void;
+  onShowDetails?: (file: BucketFile) => void;
   onZipDownload?: (keys: string[]) => void;
   isActionPending?: boolean;
 }
@@ -333,9 +336,12 @@ export default function FileGrid({
   onSelectAll,
   onClearSelection,
   onBulkDelete,
+  onDeleteSelected,
+  onTransferSelected,
   onBulkDownload,
   onDuplicateFile,
   onShowVersions,
+  onShowDetails,
   onZipDownload,
   isActionPending,
 }: FileGridProps) {
@@ -468,7 +474,12 @@ export default function FileGrid({
       case "Backspace":
         e.preventDefault();
         if (focusedIndex >= 0 && focusedIndex < allItems.length) {
-          onDeleteFile?.(allItems[focusedIndex]);
+          const item = allItems[focusedIndex];
+          if (item.isFolder && onRecursiveDeleteFolder) {
+            onRecursiveDeleteFolder(item);
+          } else {
+            onDeleteFile?.(item);
+          }
         }
         break;
       case "Escape":
@@ -476,7 +487,7 @@ export default function FileGrid({
         setPreviewFile(null);
         break;
     }
-  }, [allItems, focusedIndex, viewMode, onOpenFolder, onDeleteFile, activeConnectionId, addRecentFile]);
+  }, [allItems, focusedIndex, viewMode, onOpenFolder, onDeleteFile, onRecursiveDeleteFolder, activeConnectionId, addRecentFile]);
 
   useEffect(() => {
     setFocusedIndex(-1);
@@ -591,6 +602,14 @@ export default function FileGrid({
   const selectedFiles = files.filter((f) => selectedKeys.has(f.key));
   const selectedSize = selectedFiles.reduce((sum, f) => sum + f.size, 0);
 
+  function handleSelectedDelete() {
+    if (onDeleteSelected) {
+      onDeleteSelected(selectedFiles);
+      return;
+    }
+    onBulkDelete?.(Array.from(selectedKeys));
+  }
+
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
@@ -630,10 +649,19 @@ export default function FileGrid({
               Download ZIP
             </button>
           )}
-          {onBulkDelete && (
+          {onTransferSelected && (
+            <button
+              className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
+              onClick={() => onTransferSelected(Array.from(selectedKeys))}
+              type="button"
+            >
+              Copy/move
+            </button>
+          )}
+          {(onBulkDelete || onDeleteSelected) && (
             <button
               className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 transition-colors"
-              onClick={() => onBulkDelete(Array.from(selectedKeys))}
+              onClick={handleSelectedDelete}
               type="button"
             >
               <TrashIcon className="h-3.5 w-3.5" />
@@ -802,6 +830,7 @@ export default function FileGrid({
             onRecursiveDeleteFolder={onRecursiveDeleteFolder}
             onRenameFile={onRenameFile}
             onSetFolderColor={handleSetFolderColor}
+            onShowDetails={onShowDetails}
             onShowVersions={onShowVersions}
             position={contextMenu.position}
           />

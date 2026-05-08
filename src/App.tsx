@@ -6,10 +6,15 @@ import "./App.css";
 import AppShell from "./components/AppShell";
 import QuickUploadModal from "./components/QuickUploadModal";
 import Dashboard from "./dashboard/Dashboard";
+import ConnectionsPage from "./guide/ConnectionsPage";
+import FeaturesGuide from "./guide/FeaturesGuide";
+import Guide from "./guide/Guide";
+import MinIOGuide from "./guide/MinIOGuide";
+import PreferencesPage from "./guide/PreferencesPage";
+import ProvidersGuide from "./guide/ProvidersGuide";
+import SecurityGuide from "./guide/SecurityGuide";
 import { useDesktopQuickActions } from "./hooks/useDesktopQuickActions";
 import { useStartupUpdateCheck } from "./hooks/useStartupUpdateCheck";
-import MinIOGuide from "./minio/MinIOGuide";
-import Settings from "./settings/Settings";
 
 function CheckCircleIcon({ className }: { className?: string }) {
   return (
@@ -60,8 +65,17 @@ export default function App() {
         <Routes>
           <Route element={<AppShell />}>
             <Route element={<Dashboard />} index />
-            <Route element={<Settings />} path="settings" />
-            <Route element={<MinIOGuide />} path="minio" />
+            <Route element={<Guide />} path="guide">
+              <Route element={<Navigate replace to="/guide/connections" />} index />
+              <Route element={<ConnectionsPage />} path="connections" />
+              <Route element={<PreferencesPage />} path="preferences" />
+              <Route element={<FeaturesGuide />} path="features" />
+              <Route element={<MinIOGuide />} path="minio" />
+              <Route element={<ProvidersGuide />} path="providers" />
+              <Route element={<SecurityGuide />} path="security" />
+            </Route>
+            <Route element={<Navigate replace to="/guide/connections" />} path="settings" />
+            <Route element={<Navigate replace to="/guide/minio" />} path="minio" />
             <Route element={<Navigate replace to="/" />} path="*" />
           </Route>
         </Routes>

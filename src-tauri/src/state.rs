@@ -59,14 +59,11 @@ impl AppState {
 
     pub async fn active_bucket(&self) -> String {
         let lock = self.inner.read().await;
-        lock.as_ref()
-            .map(|s| s.bucket.clone())
-            .unwrap_or_default()
+        lock.as_ref().map(|s| s.bucket.clone()).unwrap_or_default()
     }
 
     pub async fn active_connection_id(&self) -> Option<String> {
         let lock = self.inner.read().await;
-        lock.as_ref()
-            .map(|s| s.connection_id.clone())
+        lock.as_ref().map(|s| s.connection_id.clone())
     }
 }

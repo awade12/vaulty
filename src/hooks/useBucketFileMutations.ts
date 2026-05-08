@@ -11,6 +11,7 @@ import {
   openObject,
 } from "../lib/tauri";
 import { runLocalUploadBatch } from "../lib/uploadBatch";
+import type { UploadBatchOptions } from "../lib/uploadBatch";
 import { joinObjectKey, sanitizePathSegment } from "../lib/utils";
 import { useBucketStore } from "../store/bucketStore";
 import { useUploadBatchStore } from "../store/uploadBatchStore";
@@ -25,6 +26,7 @@ function useInvalidateBucketList(): () => void {
         queryKey: ["bucket-files", activeConnectionId],
       });
     }
+    void queryClient.invalidateQueries({ queryKey: ["activity"] });
   }
 
   return invalidate;
@@ -37,10 +39,10 @@ export function useUploadFilesMutation(prefix: string) {
     // The mutation closes over `prefix` as the default upload target, but
     // callers can pass a string `targetPrefix` to override (e.g. when
     // dropping files onto a specific folder).
-    mutationFn: (input: string[] | { paths: string[]; targetPrefix: string }) => {
+    mutationFn: (input: string[] | { paths: string[]; targetPrefix: string; options?: UploadBatchOptions }) => {
       const paths = Array.isArray(input) ? input : input.paths;
       const target = Array.isArray(input) ? prefix : input.targetPrefix;
-      return runLocalUploadBatch(target, paths);
+      return runLocalUploadBatch(target, paths, Array.isArray(input) ? {} : input.options);
     },
     onSuccess: () => {
       invalidate();
