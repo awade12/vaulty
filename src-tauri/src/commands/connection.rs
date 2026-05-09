@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::error::AppError;
 use crate::s3::client;
 use crate::s3::operations;
+use crate::s3::types::{BucketPermissionReport, GlobalSearchMatch, GlobalSearchReport};
 use crate::state::AppState;
 use crate::storage::activity;
 use crate::storage::connections::{self, ConnectionConfig};
@@ -166,6 +167,199 @@ pub fn list_activity(app: tauri::AppHandle) -> Result<Vec<activity::ActivityEven
         .app_data_dir()
         .map_err(|e| AppError::Path(e.to_string()).into_string())?;
     activity::load_activity(&app_data).map_err(AppError::into_string)
+}
+
+#[tauri::command]
+pub async fn move_connection_to_profile(
+    app: tauri::AppHandle,
+    id: String,
+    credential_profile_id: String,
+) -> Result<ConnectionConfig, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Path(e.to_string()).into_string())?;
+    let profiles = credential_profiles::load_profiles(&app_data).map_err(AppError::into_string)?;
+    let profile = profiles
+        .iter()
+        .find(|p| p.id == credential_profile_id)
+        .ok_or_else(|| {
+            AppError::ConnectionNotFound {
+                id: credential_profile_id.clone(),
+            }
+            .into_string()
+        })?
+        .clone();
+    let secret = credentials::get_profile_secret(&profile.id).map_err(AppError::into_string)?;
+    let mut conns = connections::load_connections(&app_data).map_err(AppError::into_string)?;
+    let idx = conns
+        .iter()
+        .position(|c| c.id == id)
+        .ok_or_else(|| AppError::ConnectionNotFound { id: id.clone() }.into_string())?;
+    let bucket = conns[idx].bucket.clone();
+    let s3_client = client::build_client_raw(
+        &profile.provider,
+        &profile.endpoint,
+        &profile.access_key_id,
+        &secret,
+        profile.region.as_deref(),
+    )
+    .await
+    .map_err(AppError::into_string)?;
+    operations::test_connection(&s3_client, &bucket)
+        .await
+        .map_err(AppError::into_string)?;
+
+    conns[idx].provider = profile.provider;
+    conns[idx].endpoint = profile.endpoint;
+    conns[idx].region = profile.region;
+    conns[idx].access_key_id = profile.access_key_id;
+    conns[idx].credential_profile_id = profile.id.clone();
+    let updated = conns[idx].clone();
+    connections::save_connections(&app_data, &conns).map_err(AppError::into_string)?;
+    activity::append_activity(
+        &app_data,
+        "connection_moved",
+        &updated.label,
+        "Moved bucket connection to another storage account",
+    )
+    .map_err(AppError::into_string)?;
+    Ok(updated)
+}
+
+#[tauri::command]
+pub async fn check_credential_profile_permissions(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<BucketPermissionReport, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Path(e.to_string()).into_string())?;
+    let conns = connections::load_connections(&app_data).map_err(AppError::into_string)?;
+    let buckets: Vec<ConnectionConfig> = conns
+        .into_iter()
+        .filter(|c| c.credential_profile_id == id)
+        .collect();
+    if buckets.is_empty() {
+        return Ok(BucketPermissionReport {
+            profile_id: id,
+            buckets_checked: 0,
+            can_list: false,
+            can_write: false,
+            can_delete: false,
+            versioning_checked: false,
+            failures: vec!["No bucket connections use this account".to_string()],
+        });
+    }
+
+    let secret = credentials::get_profile_secret(&id).map_err(AppError::into_string)?;
+    let mut failures: Vec<String> = Vec::new();
+    let mut can_list = true;
+    let mut can_write = true;
+    let mut can_delete = true;
+
+    for conn in &buckets {
+        let s3_client = client::build_client(conn, &secret)
+            .await
+            .map_err(AppError::into_string)?;
+        if let Err(e) = operations::test_connection(&s3_client, &conn.bucket).await {
+            can_list = false;
+            failures.push(format!("{} list/head: {e}", conn.bucket));
+            continue;
+        }
+        let temp_key = format!(".vaulty-permission-check-{}", Uuid::new_v4());
+        if let Err(e) =
+            operations::put_folder_marker(&s3_client, &conn.bucket, &(temp_key.clone() + "/")).await
+        {
+            can_write = false;
+            failures.push(format!("{} write: {e}", conn.bucket));
+            continue;
+        }
+        if let Err(e) = operations::delete_object(&s3_client, &conn.bucket, &(temp_key + "/")).await
+        {
+            can_delete = false;
+            failures.push(format!("{} delete: {e}", conn.bucket));
+        }
+    }
+
+    activity::append_activity(
+        &app_data,
+        "permissions_checked",
+        &id,
+        &format!("Checked {} bucket connection(s)", buckets.len()),
+    )
+    .map_err(AppError::into_string)?;
+
+    Ok(BucketPermissionReport {
+        profile_id: id,
+        buckets_checked: buckets.len() as u32,
+        can_list,
+        can_write,
+        can_delete,
+        versioning_checked: false,
+        failures,
+    })
+}
+
+#[tauri::command]
+pub async fn global_search(
+    app: tauri::AppHandle,
+    query: String,
+) -> Result<GlobalSearchReport, String> {
+    let q = query.trim().to_lowercase();
+    if q.len() < 2 {
+        return Ok(GlobalSearchReport {
+            matches: Vec::new(),
+            scanned: 0,
+            truncated: false,
+        });
+    }
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Path(e.to_string()).into_string())?;
+    let conns = connections::load_connections(&app_data).map_err(AppError::into_string)?;
+    let mut matches: Vec<GlobalSearchMatch> = Vec::new();
+    let mut scanned: u32 = 0;
+    let mut truncated = false;
+
+    for conn in conns {
+        if matches.len() >= 250 {
+            truncated = true;
+            break;
+        }
+        let secret = credentials::get_profile_secret(&conn.credential_profile_id)
+            .map_err(AppError::into_string)?;
+        let s3_client = client::build_client(&conn, &secret)
+            .await
+            .map_err(AppError::into_string)?;
+        let remaining = 250usize.saturating_sub(matches.len());
+        let (found, s, t) = operations::search_objects_recursive(
+            &s3_client,
+            &conn.bucket,
+            "",
+            &q,
+            remaining,
+            5_000,
+        )
+        .await
+        .map_err(AppError::into_string)?;
+        scanned = scanned.saturating_add(s);
+        truncated = truncated || t;
+        matches.extend(found.into_iter().map(|file| GlobalSearchMatch {
+            connection_id: conn.id.clone(),
+            connection_label: conn.label.clone(),
+            bucket: conn.bucket.clone(),
+            file,
+        }));
+    }
+
+    Ok(GlobalSearchReport {
+        matches,
+        scanned,
+        truncated,
+    })
 }
 
 fn is_connection_duplicate(
@@ -350,11 +544,18 @@ pub async fn bulk_add_connections(
 
     if !added.is_empty() {
         connections::save_connections(&app_data, &conns).map_err(AppError::into_string)?;
+    }
+    if !added.is_empty() || !failed.is_empty() || !skipped_existing.is_empty() {
         activity::append_activity(
             &app_data,
-            "connections_added",
+            "bulk_add_connections",
             &endpoint,
-            &format!("Added {} bucket connection(s)", added.len()),
+            &format!(
+                "Added {}, skipped {}, failed {}",
+                added.len(),
+                skipped_existing.len(),
+                failed.len()
+            ),
         )
         .map_err(AppError::into_string)?;
     }

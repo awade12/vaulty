@@ -61,8 +61,13 @@ const FEATURE_GROUPS: FeatureGroup[] = [
     icon: DatabaseIcon,
     features: [
       "Save multiple bucket connections",
+      "Reuse one storage account across many buckets",
+      "Rename accounts and rotate one secret for all attached buckets",
+      "Move a bucket connection to another storage account",
+      "Check account permissions for list, write, and delete",
       "Switch active buckets from the sidebar",
       "Discover account buckets and add them in bulk",
+      "Filter discovery results, hide saved buckets, and invert selections",
       "Duplicate, edit, health-check, and remove saved connections",
       "Provider presets for AWS S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO",
     ],
@@ -79,6 +84,8 @@ const FEATURE_GROUPS: FeatureGroup[] = [
       "Customize folder style and colors",
       "Pin frequently used prefixes",
       "Filter current folder or run recursive search",
+      "Search across all connected buckets from the command palette",
+      "Switch buckets quickly with Cmd+K or Ctrl+K",
     ],
   },
   {
@@ -94,6 +101,7 @@ const FEATURE_GROUPS: FeatureGroup[] = [
       "Watch a local folder and sync changes",
       "Sync modes: copy only, move after upload, two-way, or mirror",
       "Copy or move selected files and folders to another bucket",
+      "Dry-run compare one bucket or folder prefix against another bucket",
     ],
   },
   {
@@ -108,6 +116,7 @@ const FEATURE_GROUPS: FeatureGroup[] = [
       "View and download previous versions",
       "Cleanup views for old, large, or duplicate files",
       "Usage summary for total size, largest prefixes, and file types",
+      "Operation History for account, connection, delete, and bulk-add results",
     ],
   },
   {
@@ -119,6 +128,8 @@ const FEATURE_GROUPS: FeatureGroup[] = [
       "Secrets never written to config files",
       "System tray quick actions",
       "Global quick-upload shortcut",
+      "Command palette for bucket switching and global search",
+      "Dry-run previews before bulk and folder deletes",
       "Auto-update checks",
       "macOS drag-out export to Finder",
     ],

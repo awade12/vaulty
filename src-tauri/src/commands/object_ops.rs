@@ -11,7 +11,7 @@ use zip::ZipWriter;
 use crate::error::AppError;
 use crate::s3::client;
 use crate::s3::operations;
-use crate::s3::types::FileVersion;
+use crate::s3::types::{BucketDiffReport, BucketFile, FileVersion};
 use crate::state::AppState;
 use crate::storage::{activity, connections, credentials};
 
@@ -378,4 +378,70 @@ pub async fn transfer_to_connection(
             .map_err(AppError::into_string)?;
     }
     Ok(expanded.len() as u32)
+}
+
+#[tauri::command]
+pub async fn compare_bucket_to_connection(
+    app: tauri::AppHandle,
+    target_connection_id: String,
+    prefix: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<BucketDiffReport, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Path(e.to_string()).into_string())?;
+    let conns = connections::load_connections(&app_data).map_err(AppError::into_string)?;
+    let target = conns
+        .into_iter()
+        .find(|c| c.id == target_connection_id)
+        .ok_or_else(|| {
+            AppError::ConnectionNotFound {
+                id: target_connection_id.clone(),
+            }
+            .into_string()
+        })?;
+    let target_secret = credentials::get_profile_secret(&target.credential_profile_id)
+        .map_err(AppError::into_string)?;
+    let target_client = client::build_client(&target, &target_secret)
+        .await
+        .map_err(AppError::into_string)?;
+    let source_client = state.client().await.map_err(AppError::into_string)?;
+    let source_bucket = state.active_bucket().await;
+    if source_bucket.is_empty() {
+        return Err(AppError::NoActiveConnection.into_string());
+    }
+    let prefix = prefix.unwrap_or_default();
+    let (source, scanned_source, source_truncated) =
+        operations::list_objects_recursive_limited(&source_client, &source_bucket, &prefix, 10_000)
+            .await
+            .map_err(AppError::into_string)?;
+    let (target_files, scanned_target, target_truncated) =
+        operations::list_objects_recursive_limited(&target_client, &target.bucket, &prefix, 10_000)
+            .await
+            .map_err(AppError::into_string)?;
+
+    let mut target_map = std::collections::HashMap::new();
+    for file in target_files {
+        target_map.insert(file.key.clone(), file);
+    }
+    let mut source_only: Vec<BucketFile> = Vec::new();
+    let mut changed: Vec<BucketFile> = Vec::new();
+    for file in source {
+        match target_map.remove(&file.key) {
+            None => source_only.push(file),
+            Some(other) if other.size != file.size || other.etag != file.etag => changed.push(file),
+            Some(_) => {}
+        }
+    }
+    let target_only = target_map.into_values().collect();
+
+    Ok(BucketDiffReport {
+        source_only,
+        target_only,
+        changed,
+        scanned_source,
+        scanned_target,
+        truncated: source_truncated || target_truncated,
+    })
 }

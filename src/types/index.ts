@@ -42,6 +42,64 @@ export interface DeletePreview {
   sampleKeys: string[];
 }
 
+export interface BucketPermissionReport {
+  profileId: string;
+  bucketsChecked: number;
+  canList: boolean;
+  canWrite: boolean;
+  canDelete: boolean;
+  versioningChecked: boolean;
+  failures: string[];
+}
+
+export interface GlobalSearchMatch {
+  connectionId: string;
+  connectionLabel: string;
+  bucket: string;
+  file: BucketFile;
+}
+
+export interface GlobalSearchReport {
+  matches: GlobalSearchMatch[];
+  scanned: number;
+  truncated: boolean;
+}
+
+export interface BucketDiffReport {
+  sourceOnly: BucketFile[];
+  targetOnly: BucketFile[];
+  changed: BucketFile[];
+  scannedSource: number;
+  scannedTarget: number;
+  truncated: boolean;
+}
+
+export interface MimeIssue {
+  key: string;
+  currentContentType: string;
+  suggestedContentType: string;
+  size: number;
+}
+
+export interface MimeScanReport {
+  issues: MimeIssue[];
+  scanned: number;
+  truncated: boolean;
+}
+
+export interface CatalogEntry {
+  key: string;
+  size: number;
+  lastModified: string;
+  etag: string;
+  contentType: string;
+}
+
+export interface CatalogSearchResult {
+  entries: CatalogEntry[];
+  indexedCount: number;
+}
+
 export interface BulkAddConnectionsResult {
   added: ConnectionConfig[];
   skippedExisting: string[];

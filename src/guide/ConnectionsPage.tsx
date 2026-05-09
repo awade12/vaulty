@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, type ChangeEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -11,6 +11,7 @@ import {
   duplicateConnection,
   listActivity,
   listCredentialProfiles,
+  moveConnectionToProfile,
   removeConnection,
   updateConnection,
 } from "../lib/tauri";
@@ -175,6 +176,20 @@ export default function ConnectionsPage() {
     },
   });
 
+  const moveProfileMutation = useMutation({
+    mutationFn: moveConnectionToProfile,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["connections"] });
+      await queryClient.invalidateQueries({ queryKey: ["credential-profiles"] });
+      await queryClient.invalidateQueries({ queryKey: ["activity"] });
+      setEditingId(null);
+      toast.success("Connection moved");
+    },
+    onError: (e) => {
+      toast.error(handleTauriError(e));
+    },
+  });
+
   const existingForDiscover = useMemo(() => {
     if (discoverCreds == null) return [];
     const ep = discoverCreds.endpoint.trim();
@@ -254,6 +269,16 @@ export default function ConnectionsPage() {
     removeMutation.mutate(id);
   }
 
+  function handleMoveProfileChange(e: ChangeEvent<HTMLSelectElement>): void {
+    if (editingDraft == null || e.target.value === "") {
+      return;
+    }
+    moveProfileMutation.mutate({
+      id: editingDraft.id,
+      credentialProfileId: e.target.value,
+    });
+  }
+
   return (
     <div className="flex h-full">
       <div className="min-w-0 flex-1 overflow-auto p-6">
@@ -308,6 +333,28 @@ export default function ConnectionsPage() {
           onSubmit={handleFormSubmit}
           prefill={editingDraft == null ? prefill : null}
         />
+        {editingDraft != null && credentialProfiles.length > 1 && (
+          <div className="mt-4 rounded-xl border border-[0.5px] border-zinc-200 bg-white p-4">
+            <p className="text-xs font-medium text-zinc-900">
+              Move to storage account
+            </p>
+            <select
+              className="mt-2 w-full rounded-md border border-[0.5px] border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-900 focus:border-accent-200 focus:outline-none focus:ring-2 focus:ring-accent-200/40"
+              disabled={moveProfileMutation.isPending}
+              onChange={handleMoveProfileChange}
+              value=""
+            >
+              <option value="">Choose account…</option>
+              {credentialProfiles
+                .filter((p) => p.id !== editingDraft.credentialProfileId)
+                .map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.label}
+                  </option>
+                ))}
+            </select>
+          </div>
+        )}
       </div>
 
       <DiscoverBucketsModal

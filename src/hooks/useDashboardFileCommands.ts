@@ -44,6 +44,7 @@ export function useDashboardFileCommands({
   const [shareTarget, setShareTarget] = useState<BucketFile | null>(null);
   const [uploadConflict, setUploadConflict] = useState<UploadConflict | null>(null);
   const [moveConflict, setMoveConflict] = useState<{ fromKey: string; toKey: string } | null>(null);
+  const [optimizeImages, setOptimizeImages] = useState(false);
   const uploadConflictResolver = useRef<((resolution: UploadConflictResolution) => void) | null>(null);
   const moveConflictResolver = useRef<((resolution: UploadConflictResolution) => void) | null>(null);
 
@@ -92,7 +93,11 @@ export function useDashboardFileCommands({
           ? targetFolderKey.replace(/\/+$/, "").split("/").pop() ?? "folder"
           : null;
       uploadMut.mutate(
-        { paths, targetPrefix: target, options: { onConflict: resolveUploadConflict } },
+        {
+          paths,
+          targetPrefix: target,
+          options: { onConflict: resolveUploadConflict, optimizeImages },
+        },
         {
           onError: (e) => {
             toast.error(handleTauriError(e));
@@ -111,7 +116,7 @@ export function useDashboardFileCommands({
         },
       );
     },
-    [uploadMut, prefix],
+    [uploadMut, prefix, optimizeImages],
   );
 
   useDashboardFileDrop({
@@ -125,7 +130,7 @@ export function useDashboardFileCommands({
       return;
     }
     const paths = Array.isArray(selected) ? selected : [selected];
-    uploadMut.mutate({ paths, targetPrefix: prefix, options: { onConflict: resolveUploadConflict } }, {
+    uploadMut.mutate({ paths, targetPrefix: prefix, options: { onConflict: resolveUploadConflict, optimizeImages } }, {
       onError: (e) => {
         toast.error(handleTauriError(e));
       },
@@ -154,7 +159,7 @@ export function useDashboardFileCommands({
     if (folder == null) {
       return;
     }
-    uploadMut.mutate({ paths: [folder], targetPrefix: prefix, options: { onConflict: resolveUploadConflict } }, {
+    uploadMut.mutate({ paths: [folder], targetPrefix: prefix, options: { onConflict: resolveUploadConflict, optimizeImages } }, {
       onError: (e) => {
         toast.error(handleTauriError(e));
       },
@@ -392,6 +397,8 @@ export function useDashboardFileCommands({
     shareTarget,
     uploadConflict,
     moveConflict,
+    optimizeImages,
+    setOptimizeImages,
     pendingDelete: del.pendingDelete,
     uploadMut,
     createFolderMut,

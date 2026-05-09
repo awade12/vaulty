@@ -28,6 +28,9 @@ pub fn run() {
             connection::list_credential_profiles,
             connection::update_credential_profile,
             connection::rotate_credential_profile_secret,
+            connection::move_connection_to_profile,
+            connection::check_credential_profile_permissions,
+            connection::global_search,
             connection::list_activity,
             connection::bulk_add_connections,
             connection::add_connection,
@@ -41,6 +44,10 @@ pub fn run() {
             bucket::search_objects,
             bucket::delete_file,
             bucket::preview_delete,
+            bucket::scan_mime_issues,
+            bucket::fix_mime_issues,
+            bucket::index_catalog,
+            bucket::search_catalog,
             bucket::create_folder,
             bucket::get_presigned_url,
             bucket::object_exists,
@@ -48,6 +55,7 @@ pub fn run() {
             bucket::get_cleanup_report,
             bucket::get_usage_summary,
             upload::upload_file,
+            upload::upload_optimized_image,
             upload::collect_upload_candidates,
             upload::delete_local_file,
             download::download_file,
@@ -61,6 +69,7 @@ pub fn run() {
             object_ops::list_file_versions,
             object_ops::download_file_version,
             object_ops::transfer_to_connection,
+            object_ops::compare_bucket_to_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -10,9 +10,12 @@ import ConfirmDeleteModal from "./components/ConfirmDeleteModal";
 import CleanupPanel from "./components/CleanupPanel";
 import ConflictModal from "./components/ConflictModal";
 import CrossBucketTransferModal from "./components/CrossBucketTransferModal";
+import BucketComparePanel from "./components/BucketComparePanel";
+import CatalogPanel from "./components/CatalogPanel";
 import DashboardDisconnected from "./components/DashboardDisconnected";
 import FileGrid from "./components/FileGrid";
 import FolderSyncPanel from "./components/FolderSyncPanel";
+import MimeFixerPanel from "./components/MimeFixerPanel";
 import NewFolderModal from "./components/NewFolderModal";
 import ObjectDetailsPanel from "./components/ObjectDetailsPanel";
 import RenameModal from "./components/RenameModal";
@@ -185,7 +188,7 @@ export default function Dashboard() {
   const togglePinnedPrefix = useBucketStore((s) => s.togglePinnedPrefix);
   const [versionFile, setVersionFile] = useState<BucketFile | null>(null);
   const [detailsFile, setDetailsFile] = useState<BucketFile | null>(null);
-  const [sidePanel, setSidePanel] = useState<"details" | "cleanup" | "sync" | "usage" | null>(null);
+  const [sidePanel, setSidePanel] = useState<"details" | "cleanup" | "sync" | "usage" | "compare" | "mime" | "catalog" | null>(null);
   const [transferKeys, setTransferKeys] = useState<string[] | null>(null);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
@@ -235,6 +238,18 @@ export default function Dashboard() {
 
   function handleShowUsage() {
     setSidePanel("usage");
+  }
+
+  function handleShowCompare() {
+    setSidePanel("compare");
+  }
+
+  function handleShowMime() {
+    setSidePanel("mime");
+  }
+
+  function handleShowCatalog() {
+    setSidePanel("catalog");
   }
 
   function handleCloseSidePanel() {
@@ -356,6 +371,39 @@ export default function Dashboard() {
                       <SyncIcon className="h-4 w-4 text-zinc-400" />
                       Folder sync
                     </button>
+                    <button
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-600 hover:bg-zinc-50"
+                      onClick={() => { handleShowCompare(); setMoreMenuOpen(false); }}
+                      type="button"
+                    >
+                      <SyncIcon className="h-4 w-4 text-zinc-400" />
+                      Compare buckets
+                    </button>
+                    <button
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-600 hover:bg-zinc-50"
+                      onClick={() => { handleShowMime(); setMoreMenuOpen(false); }}
+                      type="button"
+                    >
+                      <CleanupIcon className="h-4 w-4 text-zinc-400" />
+                      MIME fixer
+                    </button>
+                    <button
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-600 hover:bg-zinc-50"
+                      onClick={() => { handleShowCatalog(); setMoreMenuOpen(false); }}
+                      type="button"
+                    >
+                      <SearchIcon className="h-4 w-4 text-zinc-400" />
+                      Local catalog
+                    </button>
+                    <label className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-zinc-600 hover:bg-zinc-50">
+                      <input
+                        checked={d.optimizeImages}
+                        className="h-3.5 w-3.5 rounded border-zinc-200 text-accent-700"
+                        onChange={(e) => d.setOptimizeImages(e.target.checked)}
+                        type="checkbox"
+                      />
+                      Optimize image uploads
+                    </label>
                     <div className="my-1 border-t border-[0.5px] border-zinc-100" />
                     <button
                       className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-600 hover:bg-zinc-50"
@@ -468,6 +516,24 @@ export default function Dashboard() {
             )}
             {sidePanel === "usage" && (
               <UsageSummaryPanel onClose={handleCloseSidePanel} prefix={d.prefix} />
+            )}
+            {sidePanel === "compare" && (
+              <BucketComparePanel
+                activeConnectionId={d.active?.id ?? null}
+                connections={d.connections}
+                onClose={handleCloseSidePanel}
+                prefix={d.prefix}
+              />
+            )}
+            {sidePanel === "mime" && (
+              <MimeFixerPanel onClose={handleCloseSidePanel} prefix={d.prefix} />
+            )}
+            {sidePanel === "catalog" && (
+              <CatalogPanel
+                connectionId={d.active?.id ?? null}
+                onClose={handleCloseSidePanel}
+                prefix={d.prefix}
+              />
             )}
           </div>
         </>

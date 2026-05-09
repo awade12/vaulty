@@ -188,6 +188,16 @@ export default function SecurityGuide() {
               <p className="text-xs text-zinc-500 leading-relaxed">
                 Vaulty separates storage accounts from bucket connections. You can save one storage account, discover or add hundreds of buckets, and each bucket points back to the same keychain-backed credential profile instead of storing duplicate secrets.
               </p>
+              <p className="mt-2 text-xs text-zinc-500 leading-relaxed">
+                When you rotate a storage account secret, Vaulty tests the new secret against every attached bucket before replacing the old keychain value.
+              </p>
+            </div>
+
+            <div className="border-t border-zinc-200 pt-4">
+              <p className="text-sm font-medium text-zinc-700 mb-2">Destructive action safety</p>
+              <p className="text-xs text-zinc-500 leading-relaxed">
+                Bulk and folder deletes show a dry-run preview before the delete runs. The preview includes object count, sample keys, total size when available, and a warning if the scan hit its cap.
+              </p>
             </div>
           </div>
         </section>

@@ -12,9 +12,9 @@ export default function ActivityLogPanel({ events }: ActivityLogPanelProps) {
   return (
     <section className="mb-8">
       <div className="mb-3">
-        <p className="text-sm font-medium text-zinc-900">Activity Log</p>
+        <p className="text-sm font-medium text-zinc-900">Operation History</p>
         <p className="text-xs text-zinc-400">
-          Recent account, connection, and delete actions on this device.
+          Recent account, connection, delete, and bulk-operation results on this device.
         </p>
       </div>
       <div className="overflow-hidden rounded-xl border border-[0.5px] border-zinc-200 bg-white">

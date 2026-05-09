@@ -4,9 +4,12 @@ use tauri::State;
 
 use crate::error::AppError;
 use crate::s3::operations;
-use crate::s3::types::{BucketFile, CleanupReport, DeletePreview, ObjectDetails, UsageSummary};
+use crate::s3::types::{
+    BucketFile, CatalogSearchResult, CleanupReport, DeletePreview, MimeScanReport, ObjectDetails,
+    UsageSummary,
+};
 use crate::state::AppState;
-use crate::storage::activity;
+use crate::storage::{activity, catalog};
 
 /// Result of a recursive bucket-wide search. `truncated` is true when we hit
 /// the listing cap before the bucket was fully scanned, so the UI can hint
@@ -86,6 +89,121 @@ pub async fn preview_delete(
         total_size: 0,
         truncated: false,
         sample_keys: keys.into_iter().take(8).collect(),
+    })
+}
+
+#[tauri::command]
+pub async fn scan_mime_issues(
+    prefix: String,
+    state: State<'_, AppState>,
+) -> Result<MimeScanReport, String> {
+    let client = state.client().await.map_err(AppError::into_string)?;
+    let bucket = state.active_bucket().await;
+    if bucket.is_empty() {
+        return Err(AppError::NoActiveConnection.into_string());
+    }
+    operations::scan_mime_issues(&client, &bucket, &prefix, 1_000)
+        .await
+        .map_err(AppError::into_string)
+}
+
+#[tauri::command]
+pub async fn fix_mime_issues(
+    app: tauri::AppHandle,
+    keys: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<u32, String> {
+    let client = state.client().await.map_err(AppError::into_string)?;
+    let bucket = state.active_bucket().await;
+    if bucket.is_empty() {
+        return Err(AppError::NoActiveConnection.into_string());
+    }
+    let mut fixed = 0;
+    for key in keys {
+        if let Some(content_type) = operations::suggested_content_type(&key) {
+            operations::fix_object_content_type(&client, &bucket, &key, content_type)
+                .await
+                .map_err(AppError::into_string)?;
+            fixed += 1;
+        }
+    }
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Path(e.to_string()).into_string())?;
+    activity::append_activity(
+        &app_data,
+        "mime_fixed",
+        &bucket,
+        &format!("Fixed content type on {fixed} object(s)"),
+    )
+    .map_err(AppError::into_string)?;
+    Ok(fixed)
+}
+
+#[tauri::command]
+pub async fn index_catalog(
+    app: tauri::AppHandle,
+    connection_id: String,
+    prefix: String,
+    state: State<'_, AppState>,
+) -> Result<u32, String> {
+    let client = state.client().await.map_err(AppError::into_string)?;
+    let bucket = state.active_bucket().await;
+    if bucket.is_empty() {
+        return Err(AppError::NoActiveConnection.into_string());
+    }
+    let (entries, scanned, truncated) =
+        operations::catalog_prefix(&client, &bucket, &prefix, 5_000)
+            .await
+            .map_err(AppError::into_string)?;
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Path(e.to_string()).into_string())?;
+    catalog::save_catalog(&app_data, &connection_id, &entries).map_err(AppError::into_string)?;
+    activity::append_activity(
+        &app_data,
+        "catalog_indexed",
+        &bucket,
+        &format!(
+            "Indexed {} object(s){}",
+            entries.len(),
+            if truncated { " before scan cap" } else { "" }
+        ),
+    )
+    .map_err(AppError::into_string)?;
+    Ok(scanned)
+}
+
+#[tauri::command]
+pub fn search_catalog(
+    app: tauri::AppHandle,
+    connection_id: String,
+    query: String,
+) -> Result<CatalogSearchResult, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Path(e.to_string()).into_string())?;
+    let entries =
+        catalog::load_catalog(&app_data, &connection_id).map_err(AppError::into_string)?;
+    let q = query.trim().to_lowercase();
+    let matches = if q.is_empty() {
+        entries.iter().take(50).cloned().collect()
+    } else {
+        entries
+            .iter()
+            .filter(|e| {
+                e.key.to_lowercase().contains(&q) || e.content_type.to_lowercase().contains(&q)
+            })
+            .take(200)
+            .cloned()
+            .collect()
+    };
+    Ok(CatalogSearchResult {
+        indexed_count: entries.len() as u32,
+        entries: matches,
     })
 }
 

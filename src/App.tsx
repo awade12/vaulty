@@ -13,6 +13,7 @@ import MinIOGuide from "./guide/MinIOGuide";
 import PreferencesPage from "./guide/PreferencesPage";
 import ProvidersGuide from "./guide/ProvidersGuide";
 import SecurityGuide from "./guide/SecurityGuide";
+import WorkflowsGuide from "./guide/WorkflowsGuide";
 import { useDesktopQuickActions } from "./hooks/useDesktopQuickActions";
 import { useStartupUpdateCheck } from "./hooks/useStartupUpdateCheck";
 
@@ -70,6 +71,7 @@ export default function App() {
               <Route element={<ConnectionsPage />} path="connections" />
               <Route element={<PreferencesPage />} path="preferences" />
               <Route element={<FeaturesGuide />} path="features" />
+              <Route element={<WorkflowsGuide />} path="workflows" />
               <Route element={<MinIOGuide />} path="minio" />
               <Route element={<ProvidersGuide />} path="providers" />
               <Route element={<SecurityGuide />} path="security" />

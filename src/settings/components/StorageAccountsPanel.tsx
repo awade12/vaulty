@@ -3,11 +3,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import {
+  checkCredentialProfilePermissions,
   rotateCredentialProfileSecret,
   updateCredentialProfile,
 } from "../../lib/tauri";
 import { handleTauriError } from "../../lib/utils";
 import type { CredentialProfile } from "../../types";
+import type { BucketPermissionReport } from "../../types";
 
 interface StorageAccountsPanelProps {
   profiles: CredentialProfile[];
@@ -21,6 +23,8 @@ export default function StorageAccountsPanel({
   const [label, setLabel] = useState("");
   const [rotatingId, setRotatingId] = useState<string | null>(null);
   const [secret, setSecret] = useState("");
+  const [permissionReport, setPermissionReport] =
+    useState<BucketPermissionReport | null>(null);
 
   const updateMut = useMutation({
     mutationFn: updateCredentialProfile,
@@ -41,6 +45,15 @@ export default function StorageAccountsPanel({
       setRotatingId(null);
       setSecret("");
       toast.success("Secret rotated");
+    },
+    onError: (e) => toast.error(handleTauriError(e)),
+  });
+
+  const permissionMut = useMutation({
+    mutationFn: checkCredentialProfilePermissions,
+    onSuccess: async (report) => {
+      setPermissionReport(report);
+      await queryClient.invalidateQueries({ queryKey: ["activity"] });
     },
     onError: (e) => toast.error(handleTauriError(e)),
   });
@@ -66,6 +79,10 @@ export default function StorageAccountsPanel({
   function handleStartRotate(id: string): void {
     setRotatingId(id);
     setSecret("");
+  }
+
+  function handleCheckPermissions(id: string): void {
+    permissionMut.mutate(id);
   }
 
   function handleRotate(): void {
@@ -139,8 +156,38 @@ export default function StorageAccountsPanel({
                   >
                     Rotate
                   </button>
+                  <button
+                    className="rounded-md border border-[0.5px] border-zinc-200 bg-white px-2 py-1 text-[11px] text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600 disabled:opacity-50"
+                    disabled={permissionMut.isPending}
+                    onClick={() => handleCheckPermissions(profile.id)}
+                    type="button"
+                  >
+                    Permissions
+                  </button>
                 </div>
               </div>
+              {permissionReport?.profileId === profile.id && (
+                <div className="mt-3 rounded-lg border border-[0.5px] border-zinc-200 bg-zinc-50 p-3">
+                  <p className="text-xs font-medium text-zinc-900">
+                    Checked {permissionReport.bucketsChecked} bucket
+                    {permissionReport.bucketsChecked === 1 ? "" : "s"}
+                  </p>
+                  <p className="mt-1 text-[11px] text-zinc-400">
+                    List {permissionReport.canList ? "ok" : "failed"} · Write{" "}
+                    {permissionReport.canWrite ? "ok" : "failed"} · Delete{" "}
+                    {permissionReport.canDelete ? "ok" : "failed"}
+                  </p>
+                  {permissionReport.failures.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {permissionReport.failures.slice(0, 4).map((failure) => (
+                        <li className="text-[11px] text-red-500" key={failure}>
+                          {failure}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               {rotatingId === profile.id && (
                 <div className="mt-3 flex gap-2">
                   <input

@@ -3,13 +3,18 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   BucketFile,
   ActivityEvent,
+  BucketDiffReport,
+  BucketPermissionReport,
   BulkAddConnectionsResult,
   ConnectionConfig,
   CleanupReport,
   CredentialProfile,
   DeletePreview,
+  GlobalSearchReport,
   FileVersion,
+  CatalogSearchResult,
   LocalUploadItem,
+  MimeScanReport,
   ObjectDetails,
   UsageSummary,
 } from "../types";
@@ -58,6 +63,28 @@ export async function rotateCredentialProfileSecret(payload: {
     id: payload.id,
     secretAccessKey: payload.secretAccessKey,
   });
+}
+
+export async function checkCredentialProfilePermissions(
+  id: string,
+): Promise<BucketPermissionReport> {
+  return invoke<BucketPermissionReport>("check_credential_profile_permissions", {
+    id,
+  });
+}
+
+export async function moveConnectionToProfile(payload: {
+  id: string;
+  credentialProfileId: string;
+}): Promise<ConnectionConfig> {
+  return invoke<ConnectionConfig>("move_connection_to_profile", {
+    id: payload.id,
+    credentialProfileId: payload.credentialProfileId,
+  });
+}
+
+export async function globalSearch(query: string): Promise<GlobalSearchReport> {
+  return invoke<GlobalSearchReport>("global_search", { query });
 }
 
 export async function listActivity(): Promise<ActivityEvent[]> {
@@ -116,6 +143,22 @@ export async function uploadFile(
   return invoke<void>("upload_file", { localPath, key });
 }
 
+export async function uploadOptimizedImage(payload: {
+  localPath: string;
+  key: string;
+  maxWidth: number;
+  quality: number;
+  format: "jpeg" | "webp";
+}): Promise<void> {
+  return invoke<void>("upload_optimized_image", {
+    localPath: payload.localPath,
+    key: payload.key,
+    maxWidth: payload.maxWidth,
+    quality: payload.quality,
+    format: payload.format,
+  });
+}
+
 export async function deleteLocalFile(localPath: string): Promise<void> {
   return invoke<void>("delete_local_file", { localPath });
 }
@@ -135,6 +178,34 @@ export async function previewDelete(payload: {
   return invoke<DeletePreview>("preview_delete", {
     keys: payload.keys ?? null,
     prefix: payload.prefix ?? null,
+  });
+}
+
+export async function scanMimeIssues(prefix: string): Promise<MimeScanReport> {
+  return invoke<MimeScanReport>("scan_mime_issues", { prefix });
+}
+
+export async function fixMimeIssues(keys: string[]): Promise<number> {
+  return invoke<number>("fix_mime_issues", { keys });
+}
+
+export async function indexCatalog(payload: {
+  connectionId: string;
+  prefix: string;
+}): Promise<number> {
+  return invoke<number>("index_catalog", {
+    connectionId: payload.connectionId,
+    prefix: payload.prefix,
+  });
+}
+
+export async function searchCatalog(payload: {
+  connectionId: string;
+  query: string;
+}): Promise<CatalogSearchResult> {
+  return invoke<CatalogSearchResult>("search_catalog", {
+    connectionId: payload.connectionId,
+    query: payload.query,
   });
 }
 
@@ -241,6 +312,16 @@ export async function transferToConnection(payload: {
     targetConnectionId: payload.targetConnectionId,
     keys: payload.keys,
     deleteSource: payload.deleteSource,
+  });
+}
+
+export async function compareBucketToConnection(payload: {
+  targetConnectionId: string;
+  prefix: string | null;
+}): Promise<BucketDiffReport> {
+  return invoke<BucketDiffReport>("compare_bucket_to_connection", {
+    targetConnectionId: payload.targetConnectionId,
+    prefix: payload.prefix,
   });
 }
 

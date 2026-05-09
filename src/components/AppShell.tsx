@@ -11,6 +11,7 @@ import { activateConnection } from "../lib/tauri";
 import { handleTauriError } from "../lib/utils";
 import { useBucketStore } from "../store/bucketStore";
 import type { ConnectionConfig, CredentialProfile } from "../types";
+import CommandPalette from "./CommandPalette";
 import { getProviderConfig } from "./ProviderIcons";
 
 function sidebarConnectionPrimary(
@@ -18,9 +19,6 @@ function sidebarConnectionPrimary(
   profiles: CredentialProfile[],
 ): string {
   const profile = profiles.find((p) => p.id === conn.credentialProfileId);
-  if (conn.label !== conn.bucket) {
-    return conn.label;
-  }
   return profile?.label ?? conn.label;
 }
 
@@ -130,6 +128,7 @@ export default function AppShell() {
 
   return (
     <div className="flex h-screen bg-white">
+      <CommandPalette connections={connections} />
       <aside className="flex w-52 flex-col border-r border-[0.5px] border-zinc-200 bg-zinc-50">
         <div className="flex h-12 items-center gap-2.5 px-4">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent-700">

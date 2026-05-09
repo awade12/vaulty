@@ -84,6 +84,12 @@ const GUIDE_SECTIONS: GuideNavSection[] = [
         icon: SparkIcon,
         description: "What Vaulty can do",
       },
+      {
+        path: "/guide/workflows",
+        label: "Workflows",
+        icon: SparkIcon,
+        description: "How to use Vaulty",
+      },
     ],
   },
   {

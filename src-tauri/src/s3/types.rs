@@ -82,6 +82,80 @@ pub struct DeletePreview {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct GlobalSearchMatch {
+    pub connection_id: String,
+    pub connection_label: String,
+    pub bucket: String,
+    pub file: BucketFile,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalSearchReport {
+    pub matches: Vec<GlobalSearchMatch>,
+    pub scanned: u32,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BucketDiffReport {
+    pub source_only: Vec<BucketFile>,
+    pub target_only: Vec<BucketFile>,
+    pub changed: Vec<BucketFile>,
+    pub scanned_source: u32,
+    pub scanned_target: u32,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BucketPermissionReport {
+    pub profile_id: String,
+    pub buckets_checked: u32,
+    pub can_list: bool,
+    pub can_write: bool,
+    pub can_delete: bool,
+    pub versioning_checked: bool,
+    pub failures: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MimeIssue {
+    pub key: String,
+    pub current_content_type: String,
+    pub suggested_content_type: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MimeScanReport {
+    pub issues: Vec<MimeIssue>,
+    pub scanned: u32,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogEntry {
+    pub key: String,
+    pub size: u64,
+    pub last_modified: String,
+    pub etag: String,
+    pub content_type: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogSearchResult {
+    pub entries: Vec<CatalogEntry>,
+    pub indexed_count: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct FileVersion {
     pub version_id: String,
     pub last_modified: String,

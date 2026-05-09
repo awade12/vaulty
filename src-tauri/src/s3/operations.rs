@@ -4,7 +4,7 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::{Delete, ObjectIdentifier};
+use aws_sdk_s3::types::{Delete, MetadataDirective, ObjectIdentifier};
 use aws_sdk_s3::Client;
 use tauri::AppHandle;
 use tokio::io::AsyncWriteExt;
@@ -12,8 +12,8 @@ use tokio::io::AsyncWriteExt;
 use crate::error::AppError;
 use crate::s3::sdk_error::map_s3_sdk_error;
 use crate::s3::types::{
-    BucketFile, CleanupReport, DuplicateNameGroup, FileTypeUsage, FileVersion, ObjectDetails,
-    PrefixUsage, UsageSummary,
+    BucketFile, CatalogEntry, CleanupReport, DuplicateNameGroup, FileTypeUsage, FileVersion,
+    MimeIssue, MimeScanReport, ObjectDetails, PrefixUsage, UsageSummary,
 };
 use crate::transfer_emit::TransferEmitter;
 
@@ -216,6 +216,64 @@ pub async fn search_objects_recursive(
     }
 
     Ok((matches, scanned, truncated))
+}
+
+pub async fn list_objects_recursive_limited(
+    client: &Client,
+    bucket: &str,
+    prefix: &str,
+    max_scanned: u32,
+) -> Result<(Vec<BucketFile>, u32, bool), AppError> {
+    let mut out: Vec<BucketFile> = Vec::new();
+    let mut scanned: u32 = 0;
+    let mut truncated = false;
+    let mut token: Option<String> = None;
+
+    loop {
+        let mut req = client
+            .list_objects_v2()
+            .bucket(bucket)
+            .prefix(prefix.to_string());
+        if let Some(ref t) = token {
+            req = req.continuation_token(t);
+        }
+        let resp = req.send().await.map_err(map_s3_sdk_error)?;
+
+        for obj in resp.contents() {
+            scanned = scanned.saturating_add(1);
+            let key = obj.key().unwrap_or("").to_string();
+            if key.is_empty() || key.ends_with('/') {
+                continue;
+            }
+            out.push(BucketFile {
+                key,
+                size: obj.size().unwrap_or(0) as u64,
+                last_modified: obj
+                    .last_modified()
+                    .map(|t| t.to_string())
+                    .unwrap_or_default(),
+                etag: obj.e_tag().map(|s| s.to_string()).unwrap_or_default(),
+                is_folder: false,
+            });
+            if scanned >= max_scanned {
+                truncated = true;
+                break;
+            }
+        }
+        if truncated {
+            break;
+        }
+        if resp.is_truncated() == Some(true) {
+            token = resp.next_continuation_token().map(|s| s.to_string());
+            if token.is_none() {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    Ok((out, scanned, truncated))
 }
 
 pub async fn object_exists(client: &Client, bucket: &str, key: &str) -> Result<bool, AppError> {
@@ -808,6 +866,143 @@ pub async fn preview_delete_prefix(
         truncated: false,
         sample_keys,
     })
+}
+
+pub fn suggested_content_type(key: &str) -> Option<&'static str> {
+    let ext = key.rsplit('.').next()?.to_ascii_lowercase();
+    match ext.as_str() {
+        "html" | "htm" => Some("text/html; charset=utf-8"),
+        "css" => Some("text/css; charset=utf-8"),
+        "js" | "mjs" => Some("text/javascript; charset=utf-8"),
+        "json" => Some("application/json; charset=utf-8"),
+        "svg" => Some("image/svg+xml"),
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "webp" => Some("image/webp"),
+        "gif" => Some("image/gif"),
+        "ico" => Some("image/x-icon"),
+        "pdf" => Some("application/pdf"),
+        "txt" => Some("text/plain; charset=utf-8"),
+        "xml" => Some("application/xml; charset=utf-8"),
+        "wasm" => Some("application/wasm"),
+        "mp4" => Some("video/mp4"),
+        "webm" => Some("video/webm"),
+        "mp3" => Some("audio/mpeg"),
+        "wav" => Some("audio/wav"),
+        "zip" => Some("application/zip"),
+        _ => None,
+    }
+}
+
+pub async fn scan_mime_issues(
+    client: &Client,
+    bucket: &str,
+    prefix: &str,
+    max_scanned: u32,
+) -> Result<MimeScanReport, AppError> {
+    let (files, scanned, truncated) =
+        list_objects_recursive_limited(client, bucket, prefix, max_scanned).await?;
+    let mut issues = Vec::new();
+    for file in files {
+        let Some(suggested) = suggested_content_type(&file.key) else {
+            continue;
+        };
+        let head = client
+            .head_object()
+            .bucket(bucket)
+            .key(&file.key)
+            .send()
+            .await
+            .map_err(map_s3_sdk_error)?;
+        let current = head.content_type().unwrap_or("").to_string();
+        if current != suggested {
+            issues.push(MimeIssue {
+                key: file.key,
+                current_content_type: if current.is_empty() {
+                    "(missing)".to_string()
+                } else {
+                    current
+                },
+                suggested_content_type: suggested.to_string(),
+                size: file.size,
+            });
+        }
+    }
+    Ok(MimeScanReport {
+        issues,
+        scanned,
+        truncated,
+    })
+}
+
+pub async fn fix_object_content_type(
+    client: &Client,
+    bucket: &str,
+    key: &str,
+    content_type: &str,
+) -> Result<(), AppError> {
+    let head = client
+        .head_object()
+        .bucket(bucket)
+        .key(key)
+        .send()
+        .await
+        .map_err(map_s3_sdk_error)?;
+    let src = copy_source_for_key(bucket, key);
+    let mut req = client
+        .copy_object()
+        .bucket(bucket)
+        .key(key)
+        .copy_source(src)
+        .metadata_directive(MetadataDirective::Replace)
+        .content_type(content_type);
+    if let Some(cache_control) = head.cache_control() {
+        req = req.cache_control(cache_control);
+    }
+    if let Some(disposition) = head.content_disposition() {
+        req = req.content_disposition(disposition);
+    }
+    if let Some(encoding) = head.content_encoding() {
+        req = req.content_encoding(encoding);
+    }
+    if let Some(metadata) = head.metadata() {
+        if !metadata.is_empty() {
+            req = req.set_metadata(Some(metadata.clone()));
+        }
+    }
+    req.send().await.map_err(map_s3_sdk_error)?;
+    Ok(())
+}
+
+pub async fn catalog_prefix(
+    client: &Client,
+    bucket: &str,
+    prefix: &str,
+    max_scanned: u32,
+) -> Result<(Vec<CatalogEntry>, u32, bool), AppError> {
+    let (files, scanned, truncated) =
+        list_objects_recursive_limited(client, bucket, prefix, max_scanned).await?;
+    let mut entries = Vec::with_capacity(files.len());
+    for file in files {
+        let content_type = match client
+            .head_object()
+            .bucket(bucket)
+            .key(&file.key)
+            .send()
+            .await
+        {
+            Ok(head) => head.content_type().unwrap_or("").to_string(),
+            Err(_) => String::new(),
+        };
+        entries.push(CatalogEntry {
+            key: file.key,
+            size: file.size,
+            last_modified: file.last_modified,
+            etag: file.etag,
+            content_type,
+        });
+    }
+    Ok((entries, scanned, truncated))
 }
 
 pub async fn put_folder_marker(client: &Client, bucket: &str, key: &str) -> Result<(), AppError> {

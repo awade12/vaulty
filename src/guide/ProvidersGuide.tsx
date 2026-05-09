@@ -91,6 +91,28 @@ export default function ProvidersGuide() {
                 <span><strong className="text-zinc-700">Endpoint</strong> — Provider-specific (auto-filled for most)</span>
               </li>
             </ol>
+            <div className="mt-4 rounded-lg bg-white p-3">
+              <p className="text-xs font-medium text-zinc-700">
+                After the first bucket is saved
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+                Vaulty creates a reusable storage account profile. Add more buckets
+                from that same provider account by choosing the saved Storage Account
+                in the connection form instead of re-entering the secret.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-4">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Managing Many Buckets</h2>
+          <div className="rounded-xl border border-[0.5px] border-zinc-200 bg-white p-5">
+            <ul className="space-y-2 text-xs text-zinc-500">
+              <li>Use Discover buckets to list every bucket the account can see.</li>
+              <li>Use Hide already saved buckets to focus only on new buckets.</li>
+              <li>Use Permissions on the storage account to verify list, write, and delete access.</li>
+              <li>Use Rotate when the provider secret changes; Vaulty retests attached buckets before saving.</li>
+            </ul>
           </div>
         </section>
 

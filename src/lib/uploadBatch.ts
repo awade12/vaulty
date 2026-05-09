@@ -1,4 +1,9 @@
-import { collectUploadCandidates, objectExists, uploadFile } from "./tauri";
+import {
+  collectUploadCandidates,
+  objectExists,
+  uploadFile,
+  uploadOptimizedImage,
+} from "./tauri";
 import { joinObjectKey } from "./utils";
 import { useUploadBatchStore } from "../store/uploadBatchStore";
 import type { LocalUploadItem } from "../types";
@@ -25,6 +30,14 @@ export interface UploadConflictResolution {
 export interface UploadBatchOptions {
   onConflict?: (conflict: UploadConflict) => Promise<UploadConflictResolution>;
   skipConflictChecks?: boolean;
+  optimizeImages?: boolean;
+  imageMaxWidth?: number;
+  imageQuality?: number;
+  imageFormat?: "jpeg" | "webp";
+}
+
+function isImagePath(path: string): boolean {
+  return /\.(png|jpe?g|webp)$/i.test(path);
 }
 
 function splitKey(key: string): { base: string; ext: string } {
@@ -80,7 +93,17 @@ export async function runLocalUploadBatch(
         key = await nextAvailableKey(key);
       }
     }
-    await uploadFile(item.localPath, key);
+    if (options.optimizeImages === true && isImagePath(item.localPath)) {
+      await uploadOptimizedImage({
+        format: options.imageFormat ?? "webp",
+        key,
+        localPath: item.localPath,
+        maxWidth: options.imageMaxWidth ?? 1600,
+        quality: options.imageQuality ?? 82,
+      });
+    } else {
+      await uploadFile(item.localPath, key);
+    }
     completed++;
   }
   return { completed, total: items.length, cancelled: false };

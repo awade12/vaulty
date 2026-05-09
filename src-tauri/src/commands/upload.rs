@@ -1,7 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use image::codecs::jpeg::JpegEncoder;
+use image::codecs::webp::WebPEncoder;
+use image::{DynamicImage, GenericImageView};
 use serde::Serialize;
+use tauri::Manager;
 use tauri::State;
 use walkdir::WalkDir;
 
@@ -163,6 +167,105 @@ pub async fn upload_file(
     operations::put_object_from_file(&client, &bucket, &key, path, &app)
         .await
         .map_err(AppError::into_string)
+}
+
+#[tauri::command]
+pub async fn upload_optimized_image(
+    app: tauri::AppHandle,
+    local_path: String,
+    key: String,
+    max_width: u32,
+    quality: u8,
+    format: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let path = Path::new(&local_path);
+    if !path.is_file() {
+        return Err(AppError::Path("Select a valid image path".into()).into_string());
+    }
+    let img = image::open(path).map_err(|e| AppError::Path(e.to_string()).into_string())?;
+    let optimized = resize_image(img, max_width.max(64));
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::Path(e.to_string()).into_string())?
+        .join("optimized");
+    tokio::fs::create_dir_all(&cache)
+        .await
+        .map_err(|e| AppError::Io(e).into_string())?;
+    let ext = if format == "webp" { "webp" } else { "jpg" };
+    let out_path = cache.join(format!("{}.{}", uuid::Uuid::new_v4(), ext));
+    let bytes = encode_image(&optimized, quality.clamp(40, 95), ext)?;
+    tokio::fs::write(&out_path, bytes)
+        .await
+        .map_err(|e| AppError::Io(e).into_string())?;
+    let upload_key = replace_image_extension(&key, ext);
+    let client = state.client().await.map_err(AppError::into_string)?;
+    let bucket = state.active_bucket().await;
+    if bucket.is_empty() {
+        return Err(AppError::NoActiveConnection.into_string());
+    }
+    let _permit = state
+        .acquire_transfer_permit()
+        .await
+        .map_err(AppError::into_string)?;
+    operations::put_object_from_file(&client, &bucket, &upload_key, &out_path, &app)
+        .await
+        .map_err(AppError::into_string)?;
+    let _ = tokio::fs::remove_file(out_path).await;
+    Ok(())
+}
+
+fn resize_image(img: DynamicImage, max_width: u32) -> DynamicImage {
+    let (w, h) = img.dimensions();
+    if w <= max_width {
+        return img;
+    }
+    let next_h = ((h as f32) * (max_width as f32 / w as f32)).round() as u32;
+    img.resize(
+        max_width,
+        next_h.max(1),
+        image::imageops::FilterType::Lanczos3,
+    )
+}
+
+fn encode_image(img: &DynamicImage, quality: u8, ext: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    match ext {
+        "webp" => {
+            let rgba = img.to_rgba8();
+            WebPEncoder::new_lossless(&mut out)
+                .encode(
+                    &rgba,
+                    rgba.width(),
+                    rgba.height(),
+                    image::ExtendedColorType::Rgba8,
+                )
+                .map_err(|e| AppError::Path(e.to_string()).into_string())?;
+        }
+        _ => {
+            let rgb = img.to_rgb8();
+            JpegEncoder::new_with_quality(&mut out, quality)
+                .encode(
+                    &rgb,
+                    rgb.width(),
+                    rgb.height(),
+                    image::ExtendedColorType::Rgb8,
+                )
+                .map_err(|e| AppError::Path(e.to_string()).into_string())?;
+        }
+    }
+    Ok(out)
+}
+
+fn replace_image_extension(key: &str, ext: &str) -> String {
+    let slash = key.rfind('/').unwrap_or(0);
+    let dot = key.rfind('.');
+    if let Some(dot) = dot.filter(|dot| *dot > slash) {
+        format!("{}.{}", &key[..dot], ext)
+    } else {
+        format!("{key}.{ext}")
+    }
 }
 
 #[tauri::command]
