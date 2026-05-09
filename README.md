@@ -4,6 +4,8 @@ A desktop app for managing S3-compatible cloud storage. Browse, upload, download
 
 Built with [Tauri 2](https://tauri.app/), React, TypeScript, and Rust.
 
+![Vaulty screenshot](public/Screenshot%202026-05-08%20at%2010.27.38%E2%80%AFPM.png)
+
 ## Install
 
 Download the latest build for your OS from the
